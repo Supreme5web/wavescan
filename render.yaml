@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: wavescan-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+
+  - type: cron
+    name: wavescan-alert-sweep
+    env: python
+    plan: free
+    schedule: "*/2 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python sweep.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
