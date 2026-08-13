@@ -1,12 +1,15 @@
+import os
 import time
 
 import leaderboard
+import pnl_card
+import pnl_lookup
 import solana
 import storage
 from config import BOT_NAME
 from market import fetch_best_pair, fetch_peak_price
 from telegram import (
-    send_message, send_photo, delete_message, answer_callback_query,
+    send_message, send_photo, send_photo_file, delete_message, answer_callback_query,
     edit_message_text, edit_message_caption,
 )
 from utils import (
@@ -26,6 +29,7 @@ Commands:
 /alerts \\- list your active alerts
 /cancel `<ca>` \\- cancel an alert
 /leaderboard \\- top callers in this group, ranked by best multiplier
+/pnl `<ca>` \\- card showing this chat's first call on a token vs\\. its peak
 /ping \\- check if the bot is alive
 """.strip()
 
@@ -245,6 +249,46 @@ def handle_leaderboard(chat_id, message_id, chat_type):
     send_message(chat_id, "\n".join(lines), message_id)
 
 
+def handle_pnl(chat_id, text, message_id):
+    parts = text.split()
+    ca = parts[1] if len(parts) >= 2 else find_ca(text)
+    if not ca or not CA_RE.fullmatch(ca):
+        send_message(chat_id, "Usage: `/pnl <contract address>`", message_id)
+        return
+    if not pnl_lookup.available():
+        send_message(chat_id, "⚠️ PNL cards aren't configured on this deployment \\(missing Supabase env vars\\)\\.", message_id)
+        return
+
+    call = pnl_lookup.get_first_call(chat_id, ca)
+    if not call:
+        send_message(chat_id, "Nobody in this chat has called this token yet\\. Post the CA to log the first call\\!", message_id)
+        return
+
+    pair = fetch_best_pair(ca)
+    base = (pair or {}).get("baseToken") or {}
+    token_name = base.get("name") or call.get("symbol") or "Unknown"
+    token_symbol = base.get("symbol") or call.get("symbol") or "?"
+    logo_url = ((pair or {}).get("info") or {}).get("imageUrl")
+
+    caller_handle = call.get("username") or call.get("first_name")
+
+    path = None
+    try:
+        path = pnl_card.generate_pnl_card({
+            "token_name": token_name,
+            "token_symbol": token_symbol,
+            "entry_mc": call["entry_mc"],
+            "best_mc": call["best_mc"],
+            "username": caller_handle,
+            "logo_url": logo_url,
+        })
+        if not send_photo_file(chat_id, path, reply_to=message_id):
+            send_message(chat_id, "⚠️ Couldn't generate the PNL card, try again\\.", message_id)
+    finally:
+        if path and os.path.exists(path):
+            os.remove(path)
+
+
 def handle_callback(callback_query: dict):
     """Handles the Refresh and Delete buttons under a /data card."""
     cq_id = callback_query["id"]
@@ -329,5 +373,7 @@ def handle_update(update: dict):
         handle_cancel(chat_id, text, message_id, user)
     elif text.startswith("/leaderboard") or text.startswith("/lb"):
         handle_leaderboard(chat_id, message_id, chat_type)
+    elif text.startswith("/pnl"):
+        handle_pnl(chat_id, text, message_id)
     elif CA_RE.fullmatch(text):
         handle_data(chat_id, text, message_id, user, chat_type)

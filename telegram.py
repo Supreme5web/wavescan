@@ -49,6 +49,36 @@ def send_photo(chat_id, photo_url, caption, reply_to=None, keyboard=None) -> boo
         return False
 
 
+def send_photo_file(chat_id, file_path, caption=None, reply_to=None, keyboard=None) -> bool:
+    """Send a local image file (e.g. a generated PNL card) as multipart
+    upload. Returns False on failure so the caller can fall back gracefully."""
+    data = {"chat_id": chat_id}
+    if caption:
+        data["caption"] = caption
+        data["parse_mode"] = "MarkdownV2"
+    if reply_to:
+        data["reply_to_message_id"] = reply_to
+        data["allow_sending_without_reply"] = True
+    if keyboard:
+        import json
+        data["reply_markup"] = json.dumps(keyboard)
+    try:
+        with open(file_path, "rb") as f:
+            r = requests.post(
+                f"{TELEGRAM_API}/sendPhoto",
+                data=data,
+                files={"photo": f},
+                timeout=20,
+            )
+        if r.ok:
+            return True
+        print("sendPhoto (file) rejected:", r.text)
+        return False
+    except Exception as err:
+        print("sendPhoto (file) failed:", err)
+        return False
+
+
 def delete_message(chat_id, message_id) -> bool:
     """Delete a message (used by the Delete button). Bots can always delete
     their own messages; in groups this doesn't require admin rights."""
