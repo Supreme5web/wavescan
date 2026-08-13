@@ -13,6 +13,11 @@ CRON_SECRET = os.environ.get("CRON_SECRET")
 KV_URL = os.environ.get("UPSTASH_REDIS_REST_URL")
 KV_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
 
+# Supabase (PostgREST) — used as the group leaderboard store. Use the
+# service_role key, not anon, since writes happen from the bot server.
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
+
 DEXSCREENER_API = "https://api.dexscreener.com"
 DEXPAPRIKA_API = "https://api.dexpaprika.com"
 
@@ -34,7 +39,15 @@ TRADING_BOTS = [
     ("GMGN", lambda ca: f"https://gmgn.ai/sol/token/{ca}"),
 ]
 
-# Public Solana RPC (no API key) — used only for holder-count / top-10
-# concentration on Solana tokens, since Dexscreener/DexPaprika don't expose that.
-SOLANA_RPC_URL = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+# Solana RPC — used only for holder-count / top-10 concentration on Solana
+# tokens, since Dexscreener/DexPaprika don't expose that. Defaults to Helius
+# (much higher rate limits than the public RPC) when HELIUS_API_KEY is set;
+# falls back to the public RPC otherwise, or to SOLANA_RPC_URL if you set
+# that explicitly (e.g. to point at a different provider).
+HELIUS_API_KEY = os.environ.get("HELIUS_API_KEY")
+SOLANA_RPC_URL = os.environ.get("SOLANA_RPC_URL") or (
+    f"https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
+    if HELIUS_API_KEY
+    else "https://api.mainnet-beta.solana.com"
+)
 TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"

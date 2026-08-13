@@ -3,6 +3,7 @@ been reached. Meant to run periodically as a Render Cron Job (see render.yaml)."
 import time
 from collections import defaultdict
 
+import leaderboard
 import storage
 from config import TRADING_BOTS
 from market import fetch_best_pair, fetch_peak_price
@@ -29,10 +30,10 @@ def _ping(record: dict, symbol: str):
     send_message(record["chatId"], text)
 
 
-def run():
+def _sweep_alerts():
     if not storage.available():
-        print("KV not configured, nothing to do")
-        return {"checked": 0, "triggered": 0, "note": "KV not configured"}
+        print("KV not configured, skipping alerts")
+        return {"checked": 0, "triggered": 0}
 
     keys = storage.keys("alert:*")
     if not keys:
@@ -74,8 +75,40 @@ def run():
                 storage.delete_key(key)  # remove regardless, so a stuck chat can't retry forever
                 triggered += 1
 
-    print(f"checked={checked} triggered={triggered}")
     return {"checked": checked, "triggered": triggered}
+
+
+def _sweep_leaderboard():
+    """Ratchets best_mc up for every tracked group call, so /leaderboard
+    stays current without hitting the market API on every request."""
+    if not leaderboard.available():
+        return {"lb_checked": 0}
+
+    targets = leaderboard.distinct_targets()
+    if not targets:
+        return {"lb_checked": 0}
+
+    pair_cache = {}  # a CA called in several chats only gets fetched once
+    checked = 0
+    for chat_id, ca in targets:
+        checked += 1
+        if ca not in pair_cache:
+            pair_cache[ca] = fetch_best_pair(ca)
+        pair = pair_cache[ca]
+        if not pair:
+            continue
+        mc = pair.get("fdv") or pair.get("marketCap") or 0
+        if mc:
+            leaderboard.update_best(chat_id, ca, mc)
+
+    return {"lb_checked": checked}
+
+
+def run():
+    result = _sweep_alerts()
+    result.update(_sweep_leaderboard())
+    print(f"checked={result['checked']} triggered={result['triggered']} lb_checked={result.get('lb_checked', 0)}")
+    return result
 
 
 if __name__ == "__main__":

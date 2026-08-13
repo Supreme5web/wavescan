@@ -1,16 +1,21 @@
 import time
 
+import leaderboard
 import solana
 import storage
-from config import BOT_NAME, TRADING_BOTS
+from config import BOT_NAME
 from market import fetch_best_pair, fetch_peak_price
-from telegram import send_message, send_photo
+from telegram import (
+    send_message, send_photo, delete_message, answer_callback_query,
+    edit_message_text, edit_message_caption,
+)
 from utils import (
     escape_md, escape_url, format_usd_short, format_price, format_pct,
     format_age, risk_label, truncate_ca, parse_mc, find_ca, CA_RE,
 )
 
 ALERT_KEY = "alert:{chat_id}:{ca}:{user_id}"
+GROUP_CHAT_TYPES = ("group", "supergroup")
 
 START_MESSAGE = f"""
 *{BOT_NAME}* — fast Solana \\& multi\\-chain token lookups and market\\-cap alerts, right in Telegram\\.
@@ -20,15 +25,18 @@ Commands:
 /alert `<ca> <target mc>` \\- ping me when a token hits a target mc \\(e\\.g\\. `500k`, `1\\.2m`\\)
 /alerts \\- list your active alerts
 /cancel `<ca>` \\- cancel an alert
+/leaderboard \\- top callers in this group, ranked by best multiplier
 /ping \\- check if the bot is alive
 """.strip()
 
+_SOCIAL_EMOJI = {"twitter": "🐦", "telegram": "✈️", "discord": "🎮"}
 
-def _trade_keyboard(ca: str):
-    buttons = [{"text": label, "url": build(ca)} for label, build in TRADING_BOTS]
-    rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
-    rows.append([{"text": "📋 Copy CA", "copy_text": {"text": ca}}])
-    return {"inline_keyboard": rows}
+
+def _action_keyboard(ca: str):
+    return {"inline_keyboard": [[
+        {"text": "🔄 Refresh", "callback_data": f"refresh:{ca}"},
+        {"text": "🗑️ Delete", "callback_data": "delete"},
+    ]]}
 
 
 def _social_links_line(pair: dict) -> str:
@@ -40,11 +48,13 @@ def _social_links_line(pair: dict) -> str:
     for s in socials:
         url = s.get("url")
         if url:
-            label = label_map.get(s.get("type"), (s.get("type") or "Link").title())
-            parts.append(f"[{label}]({escape_url(url)})")
+            stype = s.get("type")
+            label = label_map.get(stype, (stype or "Link").title())
+            emoji = _SOCIAL_EMOJI.get(stype, "🔗")
+            parts.append(f"{emoji} [{label}]({escape_url(url)})")
     websites = info.get("websites") or []
     if websites and websites[0].get("url"):
-        parts.append(f"[Website]({escape_url(websites[0]['url'])})")
+        parts.append(f"🌐 [Website]({escape_url(websites[0]['url'])})")
     return " • ".join(parts)
 
 
@@ -63,7 +73,7 @@ def _build_token_message(pair: dict, ca: str) -> str:
     created_ms = pair.get("pairCreatedAt")
     txns1h = (pair.get("txns") or {}).get("h1") or {}
     buys1h, sells1h = txns1h.get("buys", 0), txns1h.get("sells", 0)
-    total1h = buys1h + sells1h
+    info = pair.get("info") or {}
 
     # ATH market cap from DexPaprika's OHLCV history since the pool was
     # created — a live snapshot alone would miss a spike that's already receded.
@@ -81,41 +91,41 @@ def _build_token_message(pair: dict, ca: str) -> str:
         holders = solana.get_holder_count(ca)
         top10_pct = solana.get_top10_concentration(ca)
 
+    # "Dex Paid" — Dexscreener only populates the `info` block (socials,
+    # website, description) for tokens whose team paid for enhanced token
+    # info, so its presence doubles as a paid-listing flag.
+    dex_paid = bool(info.get("socials") or info.get("websites") or info.get("description") or info.get("header"))
+
     lines = [
-        f"💎 {escape_md(name)} \\(${escape_md(symbol)}\\) • {escape_md(chain_id.title())} 💊",
+        f"🌊 {escape_md(name)} \\(${escape_md(symbol)}\\) • {escape_md(chain_id.title())}",
         "━" * 22,
-        "📊 *MARKET METRICS*",
-        f"• Market Cap: {escape_md(format_usd_short(mc))}  \\(ATH: {escape_md(format_usd_short(ath_mc))}\\)",
-        f"• Price: `{format_price(price)}`  \\[{escape_md(format_pct(change24))}\\]",
-        f"• Liquidity: {escape_md(format_usd_short(liq))}",
-        f"• Volume 24h: {escape_md(format_usd_short(vol24))}  \\|  1H: {escape_md(format_usd_short(vol1h))}",
-        "",
-        "⚡ FLOW & MOMENTUM",
+        f"• 💰 *MC:* {escape_md(format_usd_short(mc))}  \\(ATH: {escape_md(format_usd_short(ath_mc))}\\)",
+        f"• 💵 *Price:* `{format_price(price)}`  \\[{escape_md(format_pct(change24))}\\]",
+        f"• 💧 *Liquidity:* {escape_md(format_usd_short(liq))}",
+        f"• 📈 *Vol:* {escape_md(format_usd_short(vol24))}  \\|  1H: {escape_md(format_usd_short(vol1h))}",
     ]
-
-    if total1h:
-        buy_pct = buys1h / total1h * 100
-        lines.append(f"• 1H Trades: {buys1h} 🟢 / {sells1h} 🔴  \\({buy_pct:.0f}% Buys\\)")
-    else:
-        lines.append("• 1H Trades: N/A")
-    if holders is not None:
-        lines.append(f"• Holders: {holders}")
-    lines.append(f"• Age: {escape_md(format_age(created_ms))}")
-
-    if top10_pct is not None:
-        emoji, label = risk_label(top10_pct)
-        lines += ["", f"• Top 10: {emoji} {escape_md(f'{top10_pct:.1f}%')} \\({label}\\)"]
-
-    lines += ["", "📝 *CONTRACT ADDRESS* \\(Tap to Copy\\)", f"`{ca}`"]
 
     socials_line = _social_links_line(pair)
     if socials_line:
         lines += ["", socials_line]
 
+    lines += ["", "⚡ *FLOW*", f"• 🔄 *1H Trades:* 🟢{buys1h} / 🔴{sells1h}"]
+    if holders is not None:
+        lines.append(f"• 👥 *Holders:* {holders}")
+    lines.append(f"• ⏱️ *Age:* {escape_md(format_age(created_ms))}")
+
+    if top10_pct is not None:
+        emoji, label = risk_label(top10_pct)
+        lines.append(f"• 🎯 *Top 10:* {emoji} {escape_md(f'{top10_pct:.1f}%')} \\({label}\\)")
+
+    lines.append(f"• {'✅' if dex_paid else '❌'} *Dex Paid*")
+
+    lines += ["", f"`{ca}`"]
+
     return "\n".join(lines)
 
 
-def handle_data(chat_id, ca, message_id):
+def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
     if not ca or not CA_RE.fullmatch(ca):
         send_message(chat_id, "Usage: `/data <contract address>`", message_id)
         return
@@ -125,8 +135,13 @@ def handle_data(chat_id, ca, message_id):
         return
 
     caption = _build_token_message(pair, ca)
-    keyboard = _trade_keyboard(ca)
+    keyboard = _action_keyboard(ca)
     image_url = (pair.get("info") or {}).get("imageUrl")
+
+    if chat_type in GROUP_CHAT_TYPES and user and user.get("id") and leaderboard.available():
+        mc = pair.get("fdv") or pair.get("marketCap") or 0
+        symbol = ((pair.get("baseToken") or {}).get("symbol") or "UNKNOWN").upper()
+        leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId"), mc)
 
     if image_url and send_photo(chat_id, image_url, caption, message_id, keyboard):
         return
@@ -197,12 +212,104 @@ def handle_cancel(chat_id, text, message_id, user):
         send_message(chat_id, "No matching alert found\\.", message_id)
 
 
+def _mention_row(row: dict) -> str:
+    if row.get("username"):
+        return f"@{escape_md(row['username'])}"
+    return escape_md(row.get("first_name") or "trader")
+
+
+def handle_leaderboard(chat_id, message_id, chat_type):
+    if chat_type not in GROUP_CHAT_TYPES:
+        send_message(chat_id, "🏆 The leaderboard only tracks calls made in group chats\\.", message_id)
+        return
+    if not leaderboard.available():
+        send_message(chat_id, "⚠️ The leaderboard isn't configured on this deployment \\(missing Supabase env vars\\)\\.", message_id)
+        return
+
+    rows = leaderboard.top_callers(chat_id)
+    if not rows:
+        send_message(chat_id, "No calls tracked yet\\. Post a contract address in this chat to get on the board\\!", message_id)
+        return
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["🏆 *TOP CALLERS*", "━" * 22]
+    for i, row in enumerate(rows):
+        rank = medals[i] if i < 3 else f"{i + 1}\\."
+        entry_mc = row.get("entry_mc") or 0
+        mult = (row.get("best_mc") or 0) / entry_mc if entry_mc else 0
+        symbol = row.get("symbol") or "UNKNOWN"
+        lines.append(
+            f"{rank} {_mention_row(row)} — *${escape_md(symbol)}* "
+            f"`{escape_md(f'{mult:.1f}x')}` \\({escape_md(truncate_ca(row['ca']))}\\)"
+        )
+    send_message(chat_id, "\n".join(lines), message_id)
+
+
+def handle_callback(callback_query: dict):
+    """Handles the Refresh and Delete buttons under a /data card."""
+    cq_id = callback_query["id"]
+    data = callback_query.get("data") or ""
+    message = callback_query.get("message") or {}
+    chat_id = (message.get("chat") or {}).get("id")
+    message_id = message.get("message_id")
+
+    if data == "delete":
+        # Restrict deletion to whoever triggered the original lookup — our
+        # card is always sent as a reply to that command/CA message.
+        requester_id = ((message.get("reply_to_message") or {}).get("from") or {}).get("id")
+        caller_id = (callback_query.get("from") or {}).get("id")
+        if requester_id and caller_id != requester_id:
+            answer_callback_query(cq_id, "🚫 Only the person who requested this can delete it", show_alert=True)
+            return
+        if chat_id and message_id and delete_message(chat_id, message_id):
+            answer_callback_query(cq_id, "🗑️ Deleted")
+        else:
+            answer_callback_query(cq_id, "⚠️ Couldn't delete \\(bot may lack permission here\\)", show_alert=True)
+        return
+
+    if not data.startswith("refresh:"):
+        answer_callback_query(cq_id)
+        return
+
+    ca = data[len("refresh:"):]
+    if not (ca and CA_RE.fullmatch(ca) and chat_id and message_id):
+        answer_callback_query(cq_id, "⚠️ Can't refresh this message", show_alert=True)
+        return
+
+    pair = fetch_best_pair(ca)
+    if not pair:
+        answer_callback_query(cq_id, "❌ No pair found", show_alert=True)
+        return
+
+    caption = _build_token_message(pair, ca)
+    keyboard = _action_keyboard(ca)
+    has_photo = bool(message.get("photo"))
+
+    result = (
+        edit_message_caption(chat_id, message_id, caption, keyboard)
+        if has_photo else
+        edit_message_text(chat_id, message_id, caption, keyboard)
+    )
+
+    if result is None:
+        answer_callback_query(cq_id, "✅ Already up to date")
+    elif result:
+        answer_callback_query(cq_id, "🔄 Refreshed")
+    else:
+        answer_callback_query(cq_id, "⚠️ Refresh failed, try again", show_alert=True)
+
+
 def handle_update(update: dict):
+    if "callback_query" in update:
+        handle_callback(update["callback_query"])
+        return
+
     message = update.get("message")
     if not message:
         return
 
     chat_id = message["chat"]["id"]
+    chat_type = (message.get("chat") or {}).get("type")
     text = (message.get("text") or "").strip()
     message_id = message["message_id"]
     user = message.get("from") or {}
@@ -213,12 +320,14 @@ def handle_update(update: dict):
         send_message(chat_id, "🏓 Pong\\! WaveScan is alive\\.", message_id)
     elif text.startswith("/data"):
         ca = text[len("/data"):].strip() or find_ca((message.get("reply_to_message") or {}).get("text", ""))
-        handle_data(chat_id, ca, message_id)
+        handle_data(chat_id, ca, message_id, user, chat_type)
     elif text.startswith("/alert") and not text.startswith("/alerts"):
         handle_alert(chat_id, text, message_id, user)
     elif text == "/alerts":
         handle_list_alerts(chat_id, user.get("id"), message_id)
     elif text.startswith("/cancel"):
         handle_cancel(chat_id, text, message_id, user)
+    elif text.startswith("/leaderboard") or text.startswith("/lb"):
+        handle_leaderboard(chat_id, message_id, chat_type)
     elif CA_RE.fullmatch(text):
-        handle_data(chat_id, text, message_id)
+        handle_data(chat_id, text, message_id, user, chat_type)
