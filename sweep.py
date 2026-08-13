@@ -32,12 +32,12 @@ def _ping(record: dict, symbol: str):
 def run():
     if not storage.available():
         print("KV not configured, nothing to do")
-        return
+        return {"checked": 0, "triggered": 0, "note": "KV not configured"}
 
     keys = storage.keys("alert:*")
     if not keys:
         print("No pending alerts")
-        return
+        return {"checked": 0, "triggered": 0}
 
     # Group by CA so a token with several pending alerts is only fetched once.
     by_ca = defaultdict(list)
@@ -75,6 +75,7 @@ def run():
                 triggered += 1
 
     print(f"checked={checked} triggered={triggered}")
+    return {"checked": checked, "triggered": triggered}
 
 
 if __name__ == "__main__":

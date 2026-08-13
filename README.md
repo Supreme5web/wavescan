@@ -15,26 +15,61 @@ Helius, no RPC calls, no image rendering — just the two commands that matter.
 - `/ping` — liveness check
 - Pasting a bare contract address also runs `/data` on it
 
-## Deploy on Render (Blueprint)
+## Deploy on Render — single free Web Service
+
+Render doesn't offer a free tier for Cron Jobs (`starter` plan minimum), so
+the default setup here is a single free **Web Service** with alerts checked
+via an HTTP endpoint you trigger externally, instead of a paid Render cron.
 
 1. Push this folder to a GitHub repo.
-2. In Render, click **New → Blueprint** and point it at the repo. `render.yaml`
-   defines two services:
-   - **wavescan-bot** — the web service that receives Telegram webhook updates
-   - **wavescan-alert-sweep** — a Cron Job that checks pending alerts every 2 minutes
-3. Set the environment variables Render prompts for (shared across both services):
+2. In Render, **New → Web Service**, point it at the repo (or **New → Blueprint**
+   to use `render.yaml` directly — same result, one service either way).
+   - Build command: `pip install -r requirements.txt`
+   - Start command: `gunicorn app:app`
+3. Set environment variables:
    - `TELEGRAM_BOT_TOKEN` — from [@BotFather](https://t.me/BotFather)
-   - `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` — from an [Upstash](https://upstash.com) Redis database (free tier is fine; this is where alerts are stored). If you skip this, `/data` and `/ping` still work, but `/alert` will tell users alerts aren't configured.
-4. Once the web service is live, point Telegram at it:
+   - `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` — from an [Upstash](https://upstash.com) Redis database (free tier is fine; this is where alerts are stored). Without these, `/data` and `/ping` still work, but `/alert` will tell users alerts aren't configured.
+   - `CRON_SECRET` — any random string you make up, so strangers can't trigger your sweep endpoint.
+4. Once the service is live, point Telegram at it:
    ```
    https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://<your-service>.onrender.com/webhook
    ```
-5. Message the bot `/ping` to confirm it's alive.
+5. Set up alert checking: use a free external scheduler (e.g. [cron-job.org](https://cron-job.org))
+   to hit this URL every 1–2 minutes:
+   ```
+   https://<your-service>.onrender.com/sweep?secret=<CRON_SECRET>
+   ```
+   This also happens to keep the free web service warm, avoiding cold-start
+   delays on Telegram messages.
+6. Message the bot `/ping` to confirm it's alive.
+
+## Alternative: Render Cron Job (paid)
+
+If you'd rather not depend on a third-party scheduler, add a second service
+to `render.yaml`:
+
+```yaml
+  - type: cron
+    name: wavescan-alert-sweep
+    env: python
+    plan: starter          # cron has no free tier on Render
+    schedule: "*/2 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python sweep.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+```
+
+`sweep.py` still runs standalone via `python sweep.py`, so this drops in
+without touching any other file.
 
 ## Notes
 
-- Render's free web-service tier spins down after inactivity, which adds a
-  cold-start delay to the first message after idle. The Cron Job is
-  unaffected since Render runs it directly on schedule.
-- The sweep script groups alerts by contract address so a token with several
-  pending alerts only costs one Dexscreener + one DexPaprika call per sweep.
+- The sweep groups alerts by contract address so a token with several
+  pending alerts only costs one Dexscreener + one DexPaprika call per run,
+  whether triggered by `/sweep` or the standalone script.
