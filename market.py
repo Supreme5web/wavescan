@@ -19,21 +19,41 @@ def fetch_best_pair(ca: str):
 
 
 def fetch_peak_price(chain_id: str, pool_address: str, since_ms: int) -> float:
-    """Highest hourly 'high' on DexPaprika since an alert was created.
+    """Highest 'high' on DexPaprika since a token/alert was created.
 
     A snapshot-only check ("is price above target right now?") misses a spike
     that already receded between two sweeps. Pulling OHLCV history and taking
-    the max high since the alert was created catches that spike even if
-    price has dropped back below target by the time we poll.
+    the max high since creation catches that spike even if price has dropped
+    back below target by the time we poll.
+
+    Interval is chosen based on how old the pool is, not hardcoded to 1h:
+    DexPaprika returns *empty* OHLCV for pools too new to have a closed
+    candle at the requested granularity (their docs confirm this - "pool may
+    be too new"), so a brand-new pump.fun launch (minutes old) would always
+    come back with zero candles at 1h and silently look like "no ATH data",
+    making ath_mc fall back to the live mc forever. Using 1m/5m for young
+    pools ensures a candle actually exists to check.
     """
     network = DEXPAPRIKA_NETWORKS.get(chain_id)
     if not network or not pool_address:
         return 0
+
+    age_ms = max(0, datetime.now(tz=timezone.utc).timestamp() * 1000 - since_ms)
+    age_hours = age_ms / 3_600_000
+    if age_hours <= 2:
+        interval = "1m"
+    elif age_hours <= 24:
+        interval = "5m"
+    elif age_hours <= 24 * 7:
+        interval = "1h"
+    else:
+        interval = "24h"
+
     try:
         start = datetime.fromtimestamp(since_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
         r = requests.get(
             f"{DEXPAPRIKA_API}/networks/{network}/pools/{pool_address}/ohlcv",
-            params={"start": start, "interval": "1h"},
+            params={"start": start, "interval": interval, "limit": 500},
             timeout=10,
         )
         candles = r.json() or []

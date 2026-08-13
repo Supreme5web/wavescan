@@ -36,6 +36,21 @@ Commands:
 _SOCIAL_EMOJI = {"twitter": "🐦", "telegram": "✈️", "discord": "🎮"}
 
 
+def _fmt_plain_compact(value) -> str:
+    """5k / 400k / 1.2m style, no $ sign - used for the 'scanned by' line."""
+    v = float(value or 0)
+    if v >= 1_000_000_000:
+        num, suffix = v / 1_000_000_000, "b"
+    elif v >= 1_000_000:
+        num, suffix = v / 1_000_000, "m"
+    elif v >= 1_000:
+        num, suffix = v / 1_000, "k"
+    else:
+        return f"{v:,.0f}"
+    text = f"{num:.1f}".rstrip("0").rstrip(".")
+    return f"{text}{suffix}"
+
+
 def _action_keyboard(ca: str):
     return {"inline_keyboard": [[
         {"text": "🔄 Refresh", "callback_data": f"refresh:{ca}"},
@@ -62,7 +77,7 @@ def _social_links_line(pair: dict) -> str:
     return " • ".join(parts)
 
 
-def _build_token_message(pair: dict, ca: str) -> str:
+def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     base = pair.get("baseToken") or {}
     symbol = (base.get("symbol") or "UNKNOWN").upper()
     name = base.get("name") or symbol
@@ -100,31 +115,44 @@ def _build_token_message(pair: dict, ca: str) -> str:
     # info, so its presence doubles as a paid-listing flag.
     dex_paid = bool(info.get("socials") or info.get("websites") or info.get("description") or info.get("header"))
 
+    change_arrow = "🟢" if change24 >= 0 else "🔴"
+    change_sign = "+" if change24 >= 0 else ""
+
     lines = [
-        f"🌊 {escape_md(name)} \\(${escape_md(symbol)}\\) • {escape_md(chain_id.title())}",
-        "━" * 22,
-        f"• 💰 *MC:* {escape_md(format_usd_short(mc))}  \\(ATH: {escape_md(format_usd_short(ath_mc))}\\)",
-        f"• 💵 *Price:* `{format_price(price)}`  \\[{escape_md(format_pct(change24))}\\]",
-        f"• 💧 *Liquidity:* {escape_md(format_usd_short(liq))}",
-        f"• 📈 *Vol:* {escape_md(format_usd_short(vol24))}  \\|  1H: {escape_md(format_usd_short(vol1h))}",
+        f"💸 {escape_md(name)} \\(${escape_md(symbol)}\\) • {escape_md(chain_id.title())}",
+        "",
+        "📊  METRICS",
+        f"├ 💰 MC: `{format_usd_short(mc)}` `(ATH: {format_usd_short(ath_mc)})`",
+        f"├ 💵 Price: `{format_price(price)}` `{change_arrow} {change_sign}{change24:.1f}%`",
+        f"├ 💧 Liquidity: `{format_usd_short(liq) if liq else 'N/A'}`",
+        f"└ 📊 Vol: `{format_usd_short(vol24)}` `| 1H: {format_usd_short(vol1h)}`",
     ]
 
     socials_line = _social_links_line(pair)
     if socials_line:
         lines += ["", socials_line]
 
-    lines += ["", "⚡ *FLOW*", f"• 🔄 *1H Trades:* 🟢{buys1h} / 🔴{sells1h}"]
+    lines += [
+        "",
+        f"├ 🔄 1H Trades: `🔴{sells1h:,}/🟢{buys1h:,}`",
+    ]
     if holders is not None:
-        lines.append(f"• 👥 *Holders:* {holders}")
-    lines.append(f"• ⏱️ *Age:* {escape_md(format_age(created_ms))}")
+        lines.append(f"├ 👥 Holders: `{holders}`")
+    lines.append(f"├ ⏱️ Age: `{format_age(created_ms)}`")
 
     if top10_pct is not None:
-        emoji, label = risk_label(top10_pct)
-        lines.append(f"• 🎯 *Top 10:* {emoji} {escape_md(f'{top10_pct:.1f}%')} \\({label}\\)")
+        _, label = risk_label(top10_pct)
+        lines.append(f"├ 🐳 Top 10: `{top10_pct:.1f}%` \\({escape_md(label)}\\)")
 
-    lines.append(f"• {'✅' if dex_paid else '❌'} *Dex Paid*")
+    lines.append(f"└ 💎 Dex Paid: {'✅' if dex_paid else '❌'}")
 
-    lines += ["", f"`{ca}`"]
+    lines += ["", f" `{ca}`"]
+
+    if chat_id is not None and pnl_lookup.available():
+        first_call = pnl_lookup.get_first_call(chat_id, ca)
+        if first_call:
+            scanner = first_call.get("username") or first_call.get("first_name") or "someone"
+            lines += ["", f"1st scanned by {escape_md(scanner)} @ {escape_md(_fmt_plain_compact(first_call['entry_mc']))}"]
 
     return "\n".join(lines)
 
@@ -138,14 +166,14 @@ def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
         send_message(chat_id, f"❌ No pair found for `{escape_md(truncate_ca(ca))}`", message_id)
         return
 
-    caption = _build_token_message(pair, ca)
-    keyboard = _action_keyboard(ca)
-    image_url = (pair.get("info") or {}).get("imageUrl")
-
-    if chat_type in GROUP_CHAT_TYPES and user and user.get("id") and leaderboard.available():
+    if user and user.get("id") and leaderboard.available():
         mc = pair.get("fdv") or pair.get("marketCap") or 0
         symbol = ((pair.get("baseToken") or {}).get("symbol") or "UNKNOWN").upper()
         leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId"), mc)
+
+    caption = _build_token_message(pair, ca, chat_id)
+    keyboard = _action_keyboard(ca)
+    image_url = (pair.get("info") or {}).get("imageUrl")
 
     if image_url and send_photo(chat_id, image_url, caption, message_id, keyboard):
         return
@@ -325,7 +353,7 @@ def handle_callback(callback_query: dict):
         answer_callback_query(cq_id, "❌ No pair found", show_alert=True)
         return
 
-    caption = _build_token_message(pair, ca)
+    caption = _build_token_message(pair, ca, chat_id)
     keyboard = _action_keyboard(ca)
     has_photo = bool(message.get("photo"))
 
