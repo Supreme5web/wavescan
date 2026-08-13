@@ -16,7 +16,7 @@ services:
   - type: cron
     name: wavescan-alert-sweep
     env: python
-    plan: free
+    plan: starter
     schedule: "*/2 * * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python sweep.py
