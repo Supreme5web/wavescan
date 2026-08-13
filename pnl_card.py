@@ -18,7 +18,7 @@ import os
 import tempfile
 from typing import Optional
 
-import httpx
+import requests
 from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
@@ -88,7 +88,7 @@ def _fetch_logo(logo_url: Optional[str], size: int) -> Optional[Image.Image]:
     if not logo_url:
         return None
     try:
-        resp = httpx.get(logo_url, timeout=6)
+        resp = requests.get(logo_url, timeout=6)
         resp.raise_for_status()
         logo = Image.open(io.BytesIO(resp.content)).convert("RGBA")
     except Exception as exc:  # noqa: BLE001 - logo is optional, never fail the card for it
