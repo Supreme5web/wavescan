@@ -1,4 +1,5 @@
 import re
+import time
 
 _MD_SPECIAL = re.compile(r'([_*\[\]()~`>#+\-=|{}.!\\])')
 _MC_RE = re.compile(r'^\$?([\d,]*\.?\d+)\s*([kKmMbB])?$')
@@ -8,6 +9,11 @@ CA_RE = re.compile(r'(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})')
 def escape_md(text) -> str:
     """Escape text for Telegram MarkdownV2."""
     return _MD_SPECIAL.sub(r'\\\1', str(text))
+
+
+def escape_url(url: str) -> str:
+    """Escape a URL for use inside a MarkdownV2 [label](url) link."""
+    return str(url).replace('\\', '\\\\').replace(')', '\\)')
 
 
 def format_usd_short(value) -> str:
@@ -27,6 +33,33 @@ def format_price(value) -> str:
 
 def truncate_ca(ca: str, n: int = 4) -> str:
     return f"{ca[:n]}...{ca[-n:]}" if ca and len(ca) > 2 * n else (ca or "")
+
+
+def format_pct(value) -> str:
+    return f"{float(value or 0):+.1f}%"
+
+
+def format_age(created_ms) -> str:
+    if not created_ms:
+        return "N/A"
+    diff_ms = time.time() * 1000 - created_ms
+    days = diff_ms / 86_400_000
+    if days >= 1:
+        d = int(days)
+        return f"{d} day{'s' if d != 1 else ''}"
+    hours = diff_ms / 3_600_000
+    if hours >= 1:
+        return f"{hours:.0f}h"
+    return f"{diff_ms / 60_000:.0f}m"
+
+
+def risk_label(top10_pct: float):
+    """(emoji, label) for a top-10 holder concentration percentage."""
+    if top10_pct < 15:
+        return "🟢", "Low Risk"
+    if top10_pct < 30:
+        return "⚠️", "Medium Risk"
+    return "🔴", "High Risk"
 
 
 def parse_mc(raw: str):

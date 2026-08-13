@@ -1,10 +1,14 @@
 import time
 
+import solana
 import storage
 from config import BOT_NAME, TRADING_BOTS
-from market import fetch_best_pair
-from telegram import send_message
-from utils import escape_md, format_usd_short, format_price, truncate_ca, parse_mc, find_ca, CA_RE
+from market import fetch_best_pair, fetch_peak_price
+from telegram import send_message, send_photo
+from utils import (
+    escape_md, escape_url, format_usd_short, format_price, format_pct,
+    format_age, risk_label, truncate_ca, parse_mc, find_ca, CA_RE,
+)
 
 ALERT_KEY = "alert:{chat_id}:{ca}:{user_id}"
 
@@ -27,30 +31,87 @@ def _trade_keyboard(ca: str):
     return {"inline_keyboard": rows}
 
 
+def _social_links_line(pair: dict) -> str:
+    info = pair.get("info") or {}
+    label_map = {"twitter": "Twitter", "telegram": "Telegram", "discord": "Discord"}
+    socials = sorted(info.get("socials") or [], key=lambda s: 0 if s.get("type") == "telegram" else 1)
+
+    parts = []
+    for s in socials:
+        url = s.get("url")
+        if url:
+            label = label_map.get(s.get("type"), (s.get("type") or "Link").title())
+            parts.append(f"[{label}]({escape_url(url)})")
+    websites = info.get("websites") or []
+    if websites and websites[0].get("url"):
+        parts.append(f"[Website]({escape_url(websites[0]['url'])})")
+    return " • ".join(parts)
+
+
 def _build_token_message(pair: dict, ca: str) -> str:
     base = pair.get("baseToken") or {}
     symbol = (base.get("symbol") or "UNKNOWN").upper()
-    name = base.get("name") or ""
+    name = base.get("name") or symbol
     price = float(pair.get("priceUsd") or 0)
     mc = pair.get("fdv") or pair.get("marketCap") or 0
     liq = (pair.get("liquidity") or {}).get("usd") or 0
     vol24 = (pair.get("volume") or {}).get("h24") or 0
+    vol1h = (pair.get("volume") or {}).get("h1") or 0
     change24 = (pair.get("priceChange") or {}).get("h24") or 0
-    chain = (pair.get("chainId") or "unknown").title()
-    dex = (pair.get("dexId") or "unknown").title()
+    chain_id = pair.get("chainId") or "unknown"
+    pool = pair.get("pairAddress")
+    created_ms = pair.get("pairCreatedAt")
+    txns1h = (pair.get("txns") or {}).get("h1") or {}
+    buys1h, sells1h = txns1h.get("buys", 0), txns1h.get("sells", 0)
+    total1h = buys1h + sells1h
+
+    # ATH market cap from DexPaprika's OHLCV history since the pool was
+    # created — a live snapshot alone would miss a spike that's already receded.
+    ath_mc = mc
+    if price > 0 and mc > 0 and pool and created_ms:
+        peak_price = fetch_peak_price(chain_id, pool, created_ms)
+        if peak_price > 0:
+            ath_mc = max(ath_mc, peak_price * (mc / price))
+
+    # Holder concentration is only computable for Solana here, via free
+    # public RPC (no paid indexer) — omitted entirely for other chains or on
+    # RPC failure/timeout rather than showing a guessed number.
+    holders = top10_pct = None
+    if chain_id == "solana":
+        holders = solana.get_holder_count(ca)
+        top10_pct = solana.get_top10_concentration(ca)
 
     lines = [
-        f"*${escape_md(symbol)}* — {escape_md(name)}",
+        f"💎 {escape_md(name)} \\(${escape_md(symbol)}\\) • {escape_md(chain_id.title())} 💊",
+        "━" * 22,
+        "📊 *MARKET METRICS*",
+        f"• Market Cap: {escape_md(format_usd_short(mc))}  \\(ATH: {escape_md(format_usd_short(ath_mc))}\\)",
+        f"• Price: `{format_price(price)}`  \\[{escape_md(format_pct(change24))}\\]",
+        f"• Liquidity: {escape_md(format_usd_short(liq))}",
+        f"• Volume 24h: {escape_md(format_usd_short(vol24))}  \\|  1H: {escape_md(format_usd_short(vol1h))}",
         "",
-        f"💵 Price: `{format_price(price)}`",
-        f"💰 MC: {escape_md(format_usd_short(mc))}",
-        f"💧 Liq: {escape_md(format_usd_short(liq))}",
-        f"📊 Vol 24h: {escape_md(format_usd_short(vol24))}",
-        f"📈 24h: {escape_md(f'{change24:+.2f}%')}",
-        f"🔗 {escape_md(chain)} · {escape_md(dex)}",
-        "",
-        f"`{ca}`",
+        "⚡ FLOW & MOMENTUM",
     ]
+
+    if total1h:
+        buy_pct = buys1h / total1h * 100
+        lines.append(f"• 1H Trades: {buys1h} 🟢 / {sells1h} 🔴  \\({buy_pct:.0f}% Buys\\)")
+    else:
+        lines.append("• 1H Trades: N/A")
+    if holders is not None:
+        lines.append(f"• Holders: {holders}")
+    lines.append(f"• Age: {escape_md(format_age(created_ms))}")
+
+    if top10_pct is not None:
+        emoji, label = risk_label(top10_pct)
+        lines += ["", f"• Top 10: {emoji} {escape_md(f'{top10_pct:.1f}%')} \\({label}\\)"]
+
+    lines += ["", "📝 *CONTRACT ADDRESS* \\(Tap to Copy\\)", f"`{ca}`"]
+
+    socials_line = _social_links_line(pair)
+    if socials_line:
+        lines += ["", socials_line]
+
     return "\n".join(lines)
 
 
@@ -62,7 +123,14 @@ def handle_data(chat_id, ca, message_id):
     if not pair:
         send_message(chat_id, f"❌ No pair found for `{escape_md(truncate_ca(ca))}`", message_id)
         return
-    send_message(chat_id, _build_token_message(pair, ca), message_id, _trade_keyboard(ca))
+
+    caption = _build_token_message(pair, ca)
+    keyboard = _trade_keyboard(ca)
+    image_url = (pair.get("info") or {}).get("imageUrl")
+
+    if image_url and send_photo(chat_id, image_url, caption, message_id, keyboard):
+        return
+    send_message(chat_id, caption, message_id, keyboard)
 
 
 def handle_alert(chat_id, text, message_id, user):

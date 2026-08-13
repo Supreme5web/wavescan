@@ -33,3 +33,8 @@ TRADING_BOTS = [
     ("TRO", lambda ca: f"https://t.me/menelaus_trojanbot?start=r-{ca}"),
     ("GMGN", lambda ca: f"https://gmgn.ai/sol/token/{ca}"),
 ]
+
+# Public Solana RPC (no API key) — used only for holder-count / top-10
+# concentration on Solana tokens, since Dexscreener/DexPaprika don't expose that.
+SOLANA_RPC_URL = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
