@@ -4,6 +4,7 @@ import time
 import leaderboard
 import pnl_card
 import pnl_lookup
+import solana
 import storage
 from config import BOT_NAME
 from market import fetch_best_pair, get_ath_mc, get_market_cap
@@ -13,7 +14,7 @@ from telegram import (
 )
 from utils import (
     escape_md, escape_url, format_usd_short, format_price, format_pct,
-    format_age, truncate_ca, parse_mc, find_ca, CA_RE,
+    format_age, risk_label, truncate_ca, parse_mc, find_ca, CA_RE,
 )
 
 ALERT_KEY = "alert:{chat_id}:{ca}:{user_id}"
@@ -58,26 +59,22 @@ def _action_keyboard(ca: str):
 
 
 def _social_links_line(pair: dict) -> str:
-    socials = (pair.get("info") or {}).get("socials") or []
-    for social in socials:
-        if social.get("type") in ("twitter", "x") and social.get("url"):
-            return f"🔗 [𝕏]({escape_url(social['url'])})"
-    return ""
+    info = pair.get("info") or {}
+    label_map = {"twitter": "Twitter", "telegram": "Telegram", "discord": "Discord"}
+    socials = sorted(info.get("socials") or [], key=lambda s: 0 if s.get("type") == "telegram" else 1)
 
-
-def _fmt_change(value) -> str:
-    v = float(value or 0)
-    return f"{v:+.1f}" if v else "0.0"
-
-
-def _fmt_th(pair: dict) -> str:
-    events = pair.get("events") or {}
-    keys = ("5m", "15m", "30m", "1h", "2h")
-    values = []
-    for key in keys:
-        values.append(_fmt_change((events.get(key) or {}).get("priceChangePercentage")))
-    change24 = float((events.get("24h") or {}).get("priceChangePercentage") or 0)
-    return "| ".join(values), change24
+    parts = []
+    for s in socials:
+        url = s.get("url")
+        if url:
+            stype = s.get("type")
+            label = label_map.get(stype, (stype or "Link").title())
+            emoji = _SOCIAL_EMOJI.get(stype, "🔗")
+            parts.append(f"{emoji} [{label}]({escape_url(url)})")
+    websites = info.get("websites") or []
+    if websites and websites[0].get("url"):
+        parts.append(f"🌐 [Website]({escape_url(websites[0]['url'])})")
+    return " • ".join(parts)
 
 
 def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
@@ -86,72 +83,81 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     name = base.get("name") or symbol
     price = float(pair.get("priceUsd") or 0)
     mc = get_market_cap(pair)
-    ath_mc = get_ath_mc(pair, mc)
-    liq = float((pair.get("liquidity") or {}).get("usd") or 0)
-    vol24 = float((pair.get("volume") or {}).get("h24") or 0)
-    vol1h = float((pair.get("volume") or {}).get("h1") or 0)
+    liq = (pair.get("liquidity") or {}).get("usd") or 0
+    vol24 = (pair.get("volume") or {}).get("h24") or 0
+    vol1h = (pair.get("volume") or {}).get("h1") or 0
+    change24 = (pair.get("priceChange") or {}).get("h24") or 0
+    chain_id = pair.get("chainId") or "unknown"
+    pool = pair.get("pairAddress")
+    created_ms = pair.get("pairCreatedAt")
     txns1h = (pair.get("txns") or {}).get("h1") or {}
-    buys1h = int(txns1h.get("buys") or 0)
-    sells1h = int(txns1h.get("sells") or 0)
-    created_ms = pair.get("pairCreatedAt") or 0
-    dex = str(pair.get("dexId") or "Unknown").replace("-", " ").title()
-    holders = int(pair.get("holders") or 0)
-    dev_pct = float(pair.get("devPercentage") or 0)
-    dev_wallet = pair.get("devWallet") or ""
-    dex_paid = bool(pair.get("dexPaid"))
-    th, change24 = _fmt_th(pair)
+    buys1h, sells1h = txns1h.get("buys", 0), txns1h.get("sells", 0)
+    info = pair.get("info") or {}
 
-    age = format_age(created_ms)
-    if age == "0m":
-        age = "<1m"
+    # All-time-high market cap — Solana Tracker's /ath endpoint for Solana
+    # tokens (tracked from every indexed trade), DexPaprika OHLCV lookback
+    # as a fallback. A live snapshot alone would miss a spike that's
+    # already receded by the time this card is built.
+    ath_mc = get_ath_mc(pair, mc)
 
-    dev_status = f"Holding 🚫 ({dev_pct:.1f}%)" if dev_pct > 0 else "Not Holding ✅ (0.0%)"
-    wallet_short = f"{dev_wallet[:4]}...{dev_wallet[-4:]}" if len(dev_wallet) > 10 else (dev_wallet or "N/A")
-    paid_line = "✅ Paid" if dex_paid else "❌ Not Paid"
+    # Holder concentration is only computable for Solana here, via free
+    # public RPC (no paid indexer) — omitted entirely for other chains or on
+    # RPC failure/timeout rather than showing a guessed number.
+    holders = top10_pct = None
+    if chain_id == "solana":
+        holders = solana.get_holder_count(ca)
+        top10_pct = solana.get_top10_concentration(ca)
+
+    # "Dex Paid" — Dexscreener only populates the `info` block (socials,
+    # website, description) for tokens whose team paid for enhanced token
+    # info, so its presence doubles as a paid-listing flag.
+    dex_paid = bool(info.get("socials") or info.get("websites") or info.get("description") or info.get("header"))
+
+    change_arrow = "🟢" if change24 >= 0 else "🔴"
+    change_sign = "+" if change24 >= 0 else ""
 
     lines = [
-        f"💸 *(${escape_md(symbol)})* {escape_md(name)} | ⌛{escape_md(age)} | {escape_md(dex)}",
+        f"💸 {escape_md(name)} \\(${escape_md(symbol)}\\) • {escape_md(chain_id.title())}",
         "",
-        f"┏💰 MC: `{format_usd_short(mc)}` \(ATH `{format_usd_short(ath_mc)}`\)",
-        f"├ 💵 Price: `{format_price(price)}`",
+        "📊  METRICS",
+        f"├ 💰 MC: `{format_usd_short(mc)}` `(ATH: {format_usd_short(ath_mc)})`",
+        f"├ 💵 Price: `{format_price(price)}` `{change_arrow} {change_sign}{change24:.1f}%`",
         f"├ 💧 Liquidity: `{format_usd_short(liq) if liq else 'N/A'}`",
-        f"├📊 Vol: `{format_usd_short(vol24)}`",
-        f"├1H: `{format_usd_short(vol1h)}`",
-        f"┗ TH        `{th}` `[{change24:.0f}%]`",
-        "",
-        "👨‍💻 *Dev*",
-        "┏ Status     " + escape_md(dev_status),
-        "┣ Wallet      `" + escape_md(wallet_short) + "`",
-        "┗ DEX Paid    " + escape_md(paid_line),
+        f"└ 📊 Vol: `{format_usd_short(vol24)}` `| 1H: {format_usd_short(vol1h)}`",
     ]
 
     socials_line = _social_links_line(pair)
     if socials_line:
         lines += ["", socials_line]
 
-    lines += ["", f"`{escape_md(ca)}`"]
+    lines += [
+        "",
+        f"├ 🔄 1H Trades: `🔴{sells1h:,}/🟢{buys1h:,}`",
+    ]
+    if holders is not None:
+        lines.append(f"├ 👥 Holders: `{holders}`")
+    lines.append(f"├ ⏱️ Age: `{format_age(created_ms)}`")
 
-    # Compact terminal labels.
-    lines += ["", "AXI • TRO • BONK • MAE • GMGN"]
+    if top10_pct is not None:
+        _, label = risk_label(top10_pct)
+        lines.append(f"├ 🐳 Top 10: `{top10_pct:.1f}%` \\({escape_md(label)}\\)")
+
+    lines.append(f"└ 💎 Dex Paid: {'✅' if dex_paid else '❌'}")
+
+    lines += ["", f" `{ca}`"]
 
     if chat_id is not None and pnl_lookup.available():
         first_call = pnl_lookup.get_first_call(chat_id, ca)
         if first_call:
             scanner = first_call.get("username") or first_call.get("first_name") or "someone"
-            entry_mc = float(first_call.get("entry_mc") or 0)
-            mult = mc / entry_mc if entry_mc else 0
-            if mult >= 2:
-                perf = f"{mult:.1f}x"
-            else:
-                perf = f"{(mult - 1) * 100:+.0f}%"
-            lines += ["", f"1st scanned by {escape_md(scanner)} @ {escape_md(_fmt_plain_compact(entry_mc))} [{escape_md(perf)}]"]
+            lines += ["", f"1st scanned by {escape_md(scanner)} @ {escape_md(_fmt_plain_compact(first_call['entry_mc']))}"]
 
     return "\n".join(lines)
 
 
 def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
     if not ca or not CA_RE.fullmatch(ca):
-        send_message(chat_id, "Send a valid Solana contract address directly.", message_id)
+        send_message(chat_id, "Usage: `/data <contract address>`", message_id)
         return
     pair = fetch_best_pair(ca)
     if not pair:
@@ -265,7 +271,7 @@ def handle_leaderboard(chat_id, message_id, chat_type):
         symbol = row.get("symbol") or "UNKNOWN"
         lines.append(
             f"{rank} {_mention_row(row)} — *${escape_md(symbol)}* "
-            f"`{escape_md(f'{mult:.1f}x')}` \\({escape_md(truncate_ca(row['ca']))}\\)"
+            f"`{escape_md(f'{mult:.1f}x')}` \\({escape_md(truncate_ca(row.get('ca') or ''))}\\)"
         )
     send_message(chat_id, "\n".join(lines), message_id)
 
@@ -298,8 +304,8 @@ def handle_pnl(chat_id, text, message_id):
         path = pnl_card.generate_pnl_card({
             "token_name": token_name,
             "token_symbol": token_symbol,
-            "entry_mc": call["entry_mc"],
-            "best_mc": call["best_mc"],
+            "entry_mc": call.get("entry_mc") or 0,
+            "best_mc": call.get("best_mc") or call.get("entry_mc") or 0,
             "username": caller_handle,
             "logo_url": logo_url,
         })
