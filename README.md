@@ -1,10 +1,6 @@
 # WaveScan
 
-A lean Telegram bot for token lookups and market-cap alerts. Data comes from
-[Dexscreener](https://dexscreener.com) (live price/liquidity/volume) and
-[DexPaprika](https://dexpaprika.com) (hourly OHLCV history, used only to catch
-price spikes that already receded between two alert sweeps). No Codex, no
-Helius, no RPC calls, no image rendering — just the two commands that matter.
+A lean Telegram bot for token lookups and market-cap alerts. Market/token data comes exclusively from Solana Tracker. Holder analytics still use the configured Solana RPC. No Dexscreener or DexPaprika market-data calls are used.
 
 ## Commands
 
@@ -93,8 +89,7 @@ without touching any other file.
 ## Notes
 
 - The sweep groups alerts by contract address so a token with several
-  pending alerts only costs one Dexscreener + one DexPaprika call per run,
-  whether triggered by `/sweep` or the standalone script.
+  pending alerts only requires one Solana Tracker token lookup per run.
 - The same sweep also refreshes the leaderboard: it ratchets each tracked
   call's `best_mc` up using the live market cap (not an OHLCV lookback like
   alerts do), so a spike that fully reverses between two sweeps can be

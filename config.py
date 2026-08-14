@@ -18,20 +18,6 @@ KV_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
 
-DEXSCREENER_API = "https://api.dexscreener.com"
-DEXPAPRIKA_API = "https://api.dexpaprika.com"
-
-# Dexscreener chainId -> DexPaprika network slug, for OHLCV peak-price lookups.
-DEXPAPRIKA_NETWORKS = {
-    "solana": "solana",
-    "ethereum": "ethereum",
-    "bsc": "bsc",
-    "base": "base",
-    "arbitrum": "arbitrum",
-    "polygon": "polygon",
-    "avalanche": "avalanche",
-}
-
 # Quick-trade deep links shown under every token lookup / alert ping.
 TRADING_BOTS = [
     ("AXI", lambda ca: f"https://axiom.trade/t/{ca}"),
@@ -52,10 +38,6 @@ SOLANA_RPC_URL = os.environ.get("SOLANA_RPC_URL") or (
 )
 TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 
-# Solana Tracker Data API — used for accurate Solana token info + a real
-# all-time-high (Solana Tracker tracks every indexed trade, so its /ath
-# endpoint doesn't miss spikes the way a coarse OHLCV lookback can) and as
-# a fallback market-cap source when Dexscreener hasn't populated fdv/marketCap
-# yet (common for pairs that are only seconds/minutes old).
+# Solana Tracker Data API — the sole market-data source for WaveScan.
 SOLANATRACKER_API = "https://data.solanatracker.io"
 SOLANATRACKER_API_KEY = os.environ.get("SOLANATRACKER_API_KEY")

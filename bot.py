@@ -94,10 +94,7 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     buys1h, sells1h = txns1h.get("buys", 0), txns1h.get("sells", 0)
     info = pair.get("info") or {}
 
-    # All-time-high market cap — Solana Tracker's /ath endpoint for Solana
-    # tokens (tracked from every indexed trade), DexPaprika OHLCV lookback
-    # as a fallback. A live snapshot alone would miss a spike that's
-    # already receded by the time this card is built.
+    # All-time-high market cap from Solana Tracker's indexed /ath endpoint.
     ath_mc = get_ath_mc(pair, mc)
 
     # Holder concentration is only computable for Solana here, via free
@@ -108,10 +105,6 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
         holders = solana.get_holder_count(ca)
         top10_pct = solana.get_top10_concentration(ca)
 
-    # "Dex Paid" — Dexscreener only populates the `info` block (socials,
-    # website, description) for tokens whose team paid for enhanced token
-    # info, so its presence doubles as a paid-listing flag.
-    dex_paid = bool(info.get("socials") or info.get("websites") or info.get("description") or info.get("header"))
 
     change_arrow = "🟢" if change24 >= 0 else "🔴"
     change_sign = "+" if change24 >= 0 else ""
@@ -142,7 +135,7 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
         _, label = risk_label(top10_pct)
         lines.append(f"├ 🐳 Top 10: `{top10_pct:.1f}%` \\({escape_md(label)}\\)")
 
-    lines.append(f"└ 💎 Dex Paid: {'✅' if dex_paid else '❌'}")
+    lines.append("└ 📡 Data: `Solana Tracker`")
 
     lines += ["", f" `{ca}`"]
 
