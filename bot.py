@@ -86,71 +86,56 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     liq = (pair.get("liquidity") or {}).get("usd") or 0
     vol24 = (pair.get("volume") or {}).get("h24") or 0
     vol1h = (pair.get("volume") or {}).get("h1") or 0
-    change24 = (pair.get("priceChange") or {}).get("h24") or 0
-    chain_id = pair.get("chainId") or "unknown"
-    pool = pair.get("pairAddress")
     created_ms = pair.get("pairCreatedAt")
     txns1h = (pair.get("txns") or {}).get("h1") or {}
     buys1h, sells1h = txns1h.get("buys", 0), txns1h.get("sells", 0)
     info = pair.get("info") or {}
-
-    # All-time-high market cap — Solana Tracker's /ath endpoint for Solana
-    # tokens (tracked from every indexed trade), DexPaprika OHLCV lookback
-    # as a fallback. A live snapshot alone would miss a spike that's
-    # already receded by the time this card is built.
     ath_mc = get_ath_mc(pair, mc)
-
-    # Holder concentration is only computable for Solana here, via free
-    # public RPC (no paid indexer) — omitted entirely for other chains or on
-    # RPC failure/timeout rather than showing a guessed number.
-    holders = top10_pct = None
-    if chain_id == "solana":
-        holders = solana.get_holder_count(ca)
-        top10_pct = solana.get_top10_concentration(ca)
-
-    # "Dex Paid" — Dexscreener only populates the `info` block (socials,
-    # website, description) for tokens whose team paid for enhanced token
-    # info, so its presence doubles as a paid-listing flag.
     dex_paid = bool(info.get("socials") or info.get("websites") or info.get("description") or info.get("header"))
 
-    change_arrow = "🟢" if change24 >= 0 else "🔴"
-    change_sign = "+" if change24 >= 0 else ""
+    # Keep the requested UI; escape only characters required by Telegram MarkdownV2.
+    safe_name = escape_md(name)
+    safe_symbol = escape_md(symbol)
+    safe_ca = escape_md(ca)
+    chain_name = escape_md((pair.get("dexId") or pair.get("chainId") or "unknown").title())
+    age = escape_md(format_age(created_ms))
+    holding = pair.get("devHolding")
+    wallet = pair.get("devWallet") or "N/A"
+    if holding is None:
+        dev_status = "Unknown"
+        holding_text = ""
+    else:
+        dev_status = "Holding 🚫" if float(holding) > 0 else "Not Holding ✅"
+        holding_text = f" ({float(holding):.1f}%)"
+
+    # TH is intentionally compact to match the requested card.
+    th = pair.get("th") or [0, 0, 0, 0, 0]
+    th = list(th)[:5] + [0] * max(0, 5 - len(th))
+    th_text = " | ".join(f"{float(x):.1f}" for x in th[:5])
+    change = pair.get("priceChange") or {}
+    change_pct = float(change.get("h1") or change.get("h24") or 0)
 
     lines = [
-        f"💸 {escape_md(name)} \\(${escape_md(symbol)}\\) • {escape_md(chain_id.title())}",
+        f"💸 \\(${safe_symbol}\\) {safe_name} | ⌛ {age} | {chain_name}",
         "",
-        "📊  METRICS",
-        f"├ 💰 MC: `{format_usd_short(mc)}` `(ATH: {format_usd_short(ath_mc)})`",
-        f"├ 💵 Price: `{format_price(price)}` `{change_arrow} {change_sign}{change24:.1f}%`",
-        f"├ 💧 Liquidity: `{format_usd_short(liq) if liq else 'N/A'}`",
-        f"└ 📊 Vol: `{format_usd_short(vol24)}` `| 1H: {format_usd_short(vol1h)}`",
-    ]
-
-    socials_line = _social_links_line(pair)
-    if socials_line:
-        lines += ["", socials_line]
-
-    lines += [
+        f"┏ 💰 MC: {escape_md(format_usd_short(mc))} \\(ATH {escape_md(format_usd_short(ath_mc))}\\)",
+        f"├ 💵 Price: {escape_md(format_price(price))}",
+        f"├ 💧 Liquidity: {escape_md(format_usd_short(liq) if liq else 'N/A')}",
+        f"├ 📊 Vol: {escape_md(format_usd_short(vol24))}",
+        f"├ 1H: {escape_md(format_usd_short(vol1h))}",
+        f"┗ TH        {escape_md(th_text)} [{change_pct:.0f}%]",
         "",
-        f"├ 🔄 1H Trades: `🔴{sells1h:,}/🟢{buys1h:,}`",
+        "👨‍💻 Dev",
+        f"┏ Status     {escape_md(dev_status)}{escape_md(holding_text)}",
+        f"┣ Wallet      {escape_md(wallet)}",
+        f"┗ DEX Paid    {'✅ Paid' if dex_paid else '❌ Not Paid'}",
+        "",
+        "🔗 𝕏",
+        "",
+        safe_ca,
+        "",
+        "AXI • TRO • BONK • MAE • GMGN",
     ]
-    if holders is not None:
-        lines.append(f"├ 👥 Holders: `{holders}`")
-    lines.append(f"├ ⏱️ Age: `{format_age(created_ms)}`")
-
-    if top10_pct is not None:
-        _, label = risk_label(top10_pct)
-        lines.append(f"├ 🐳 Top 10: `{top10_pct:.1f}%` \\({escape_md(label)}\\)")
-
-    lines.append(f"└ 💎 Dex Paid: {'✅' if dex_paid else '❌'}")
-
-    lines += ["", f" `{ca}`"]
-
-    if chat_id is not None and pnl_lookup.available():
-        first_call = pnl_lookup.get_first_call(chat_id, ca)
-        if first_call:
-            scanner = first_call.get("username") or first_call.get("first_name") or "someone"
-            lines += ["", f"1st scanned by {escape_md(scanner)} @ {escape_md(_fmt_plain_compact(first_call['entry_mc']))}"]
 
     return "\n".join(lines)
 
@@ -271,7 +256,7 @@ def handle_leaderboard(chat_id, message_id, chat_type):
         symbol = row.get("symbol") or "UNKNOWN"
         lines.append(
             f"{rank} {_mention_row(row)} — *${escape_md(symbol)}* "
-            f"`{escape_md(f'{mult:.1f}x')}` \\({escape_md(truncate_ca(row.get('ca') or ''))}\\)"
+            f"`{escape_md(f'{mult:.1f}x')}` \\({escape_md(truncate_ca(row['ca']))}\\)"
         )
     send_message(chat_id, "\n".join(lines), message_id)
 
@@ -304,8 +289,8 @@ def handle_pnl(chat_id, text, message_id):
         path = pnl_card.generate_pnl_card({
             "token_name": token_name,
             "token_symbol": token_symbol,
-            "entry_mc": call.get("entry_mc") or 0,
-            "best_mc": call.get("best_mc") or call.get("entry_mc") or 0,
+            "entry_mc": call["entry_mc"],
+            "best_mc": call["best_mc"],
             "username": caller_handle,
             "logo_url": logo_url,
         })
@@ -389,6 +374,9 @@ def handle_update(update: dict):
         send_message(chat_id, START_MESSAGE, message_id)
     elif text == "/ping":
         send_message(chat_id, "🏓 Pong\\! WaveScan is alive\\.", message_id)
+    elif text.startswith("/data"):
+        ca = text[len("/data"):].strip() or find_ca((message.get("reply_to_message") or {}).get("text", ""))
+        handle_data(chat_id, ca, message_id, user, chat_type)
     elif text.startswith("/alert") and not text.startswith("/alerts"):
         handle_alert(chat_id, text, message_id, user)
     elif text == "/alerts":
