@@ -284,10 +284,20 @@ def handle_pnl(chat_id, text, message_id):
 
     call = pnl_lookup.get_first_call(chat_id, ca)
     if not call:
-        send_message(chat_id, "Nobody in this chat has called this token yet\\. Post the CA to log the first call\\!", message_id)
+        send_message(chat_id, "Nobody in this chat has called this token yet\. Post the CA to log the first call\!", message_id)
         return
 
+    # Always take a fresh Solana Tracker snapshot when PNL is requested.
+    # This prevents a PNL card from showing 1.00x simply because the periodic
+    # leaderboard sweep has not run since the token moved.
     pair = fetch_best_pair(ca)
+    current_mc = get_market_cap(pair) if pair else 0.0
+    if current_mc > 0:
+        leaderboard.update_best(chat_id, ca, current_mc)
+        refreshed_call = pnl_lookup.get_first_call(chat_id, ca)
+        if refreshed_call:
+            call = refreshed_call
+
     base = (pair or {}).get("baseToken") or {}
     token_name = base.get("name") or call.get("symbol") or "Unknown"
     token_symbol = base.get("symbol") or call.get("symbol") or "?"
@@ -347,6 +357,11 @@ def handle_callback(callback_query: dict):
     if not pair:
         answer_callback_query(cq_id, "❌ No pair found", show_alert=True)
         return
+
+    # A manual refresh is also a leaderboard/PNL peak checkpoint.
+    current_mc = get_market_cap(pair)
+    if current_mc > 0:
+        leaderboard.update_best(chat_id, ca, current_mc)
 
     caption = _build_token_message(pair, ca, chat_id)
     keyboard = _action_keyboard(ca)
