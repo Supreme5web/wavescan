@@ -122,6 +122,28 @@ def distinct_targets():
         return []
 
 
+def calls_for_target(chat_id, ca: str):
+    """All logged call rows for (chat_id, ca), including each caller's
+    entry/best mc — used by the sweep to detect fresh 2x crossings."""
+    if not available():
+        return []
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/calls",
+            headers=_headers(),
+            params={
+                "chat_id": f"eq.{chat_id}",
+                "ca": f"eq.{ca}",
+                "select": "user_id,username,first_name,symbol,entry_mc,best_mc,message_id",
+            },
+            timeout=_TIMEOUT,
+        )
+        return r.json() if r.ok else []
+    except Exception as err:
+        print("leaderboard calls_for_target failed:", err)
+        return []
+
+
 def update_best(chat_id, ca: str, mc: float) -> None:
     """Ratchet best_mc up (single request, all callers on this ca at once)."""
     if not available() or not mc:

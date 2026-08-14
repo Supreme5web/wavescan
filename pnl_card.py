@@ -40,12 +40,12 @@ CYAN = (56, 189, 248, 255)
 CONTENT_LEFT_F = 80 / 1672
 COL2_X_F = 561 / 1672
 CONTENT_RIGHT_F = 1592 / 1672
+IDENTITY_TOP_F = 150 / 941
 HEADER_BOTTOM_F = 227 / 941
-DIVIDER_Y_F = 440 / 941
-LABEL_TOP_F = 305 / 941
-VALUE_TOP_F = 363 / 941
-CAPTION_TOP_F = 478 / 941
-LOGO_SIZE_F = 64 / 941
+DIVIDER_Y_F = 403 / 941
+LABEL_TOP_F = 268 / 941
+VALUE_TOP_F = 326 / 941
+CAPTION_TOP_F = 441 / 941
 
 
 def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
@@ -143,15 +143,16 @@ def generate_pnl_card(call: dict) -> str:
     content_left = int(W * CONTENT_LEFT_F)
     col2_x = int(W * COL2_X_F)
     content_right = int(W * CONTENT_RIGHT_F)
+    identity_top = int(H * IDENTITY_TOP_F)
     header_bottom = int(H * HEADER_BOTTOM_F)
     divider_y = int(H * DIVIDER_Y_F)
     label_top = int(H * LABEL_TOP_F)
     value_top = int(H * VALUE_TOP_F)
     caption_top = int(H * CAPTION_TOP_F)
-    logo_size = max(28, int(H * LOGO_SIZE_F))
+    logo_size = max(40, header_bottom - identity_top - 8)
 
-    # --- Token identity, small row in the gap above the stats ---------------
-    logo_box = (content_left, header_bottom + 6, content_left + logo_size, header_bottom + 6 + logo_size)
+    # --- Token identity, top-left in the free header band, ending at the line
+    logo_box = (content_left, identity_top, content_left + logo_size, identity_top + logo_size)
     logo_img = _fetch_logo(call.get("logo_url"), logo_size)
     if logo_img is not None:
         overlay.paste(logo_img, (logo_box[0], logo_box[1]), logo_img)
@@ -162,7 +163,7 @@ def generate_pnl_card(call: dict) -> str:
     name_x = logo_box[2] + 14
     name_max_w = col2_x - name_x - 20
     name_text = f"{call['token_name']} (${call['token_symbol'].upper()})"
-    name_font = _fit_text(draw, name_text, FONT_BOLD, name_max_w, 46)
+    name_font = _fit_text(draw, name_text, FONT_BOLD, name_max_w, 54)
     name_display = _truncate_to_width(draw, name_text, name_font, name_max_w)
     name_y = logo_box[1] + (logo_size - name_font.size) / 2 - 2
     draw.text((name_x, name_y), name_display, font=name_font, fill=WHITE)

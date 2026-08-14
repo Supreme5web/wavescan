@@ -159,13 +159,13 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
             jump_link = _jump_link(chat_id, first_call.get("message_id"))
 
             footer = (
-                f"💢[{escape_md(scanner)}]({escape_url(deep_link)}) @ "
+                f"*💢[{escape_md(scanner)}]({escape_url(deep_link)}) @ "
                 f"{escape_md(format_usd_short(entry_mc))} \\[{escape_md(perf)}\\]"
             )
             if jump_link:
-                footer += f" \\([{escape_md(age)}]({escape_url(jump_link)}) ago\\)"
+                footer += f" \\([{escape_md(age)}]({escape_url(jump_link)}) ago\\)*"
             else:
-                footer += f" \\({escape_md(age)} ago\\)"
+                footer += f" \\({escape_md(age)} ago\\)*"
 
             lines += ["", footer]
 
@@ -265,9 +265,14 @@ def handle_cancel(chat_id, text, message_id, user):
 
 
 def _mention_row(row: dict) -> str:
-    if row.get("username"):
-        return f"@{escape_md(row['username'])}"
-    return escape_md(row.get("first_name") or "trader")
+    username = row.get("username")
+    if username:
+        return f"[@{escape_md(username)}](https://t.me/{username})"
+    label = escape_md(row.get("first_name") or "trader")
+    user_id = row.get("user_id") or row.get("userId")
+    if user_id:
+        return f"[{label}](tg://user?id={user_id})"
+    return label
 
 
 LB_PERIODS = {"1h": 1, "4h": 4, "12h": 12, "1d": 24}
@@ -319,7 +324,7 @@ def _build_leaderboard_message(chat_id, period: str) -> str:
         prefix = "└" if i == len(top10) - 1 else "├"
         symbol = row.get("symbol") or "UNKNOWN"
         lines.append(
-            f"{prefix} 🟣 {escape_md(symbol)} » {_mention_row(row)} \\· {escape_md(f'{mult:.1f}x')}"
+            f"{prefix} 🟣 {escape_md(symbol)} » {_mention_row(row)} •\\({escape_md(f'{mult:.1f}x')}\\)"
         )
     return "\n".join(lines)
 

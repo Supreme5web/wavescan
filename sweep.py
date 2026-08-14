@@ -67,6 +67,21 @@ def _sweep_alerts():
     return {"checked": checked, "triggered": triggered}
 
 
+def _mention_call(row: dict) -> str:
+    if row.get("username"):
+        return f"[@{escape_md(row['username'])}](https://t.me/{row['username']})"
+    label = escape_md(row.get("first_name") or "trader")
+    return f"[{label}](tg://user?id={row['user_id']})"
+
+
+def _send_2x_alert(chat_id, row: dict, symbol: str, mult: float):
+    text = "\n".join([
+        "🚀 *2X CALL\\!*",
+        f"{_mention_call(row)} called *${escape_md(symbol)}* — now *{escape_md(f'{mult:.1f}x')}* 🔥",
+    ])
+    send_message(chat_id, text, reply_to=row.get("message_id"))
+
+
 def _sweep_leaderboard():
     if not leaderboard.available():
         return {"lb_checked": 0}
@@ -85,8 +100,23 @@ def _sweep_leaderboard():
         if not pair:
             continue
         mc = get_market_cap(pair)
-        if mc:
-            leaderboard.update_best(chat_id, ca, mc)
+        if not mc:
+            continue
+
+        symbol = ((pair.get("baseToken") or {}).get("symbol") or "UNKNOWN").upper()
+        for row in leaderboard.calls_for_target(chat_id, ca):
+            entry_mc = float(row.get("entry_mc") or 0)
+            if not entry_mc:
+                continue
+            old_mult = float(row.get("best_mc") or 0) / entry_mc
+            new_mult = mc / entry_mc
+            if new_mult >= 2 and old_mult < 2:
+                try:
+                    _send_2x_alert(chat_id, row, row.get("symbol") or symbol, new_mult)
+                except Exception as err:
+                    print(f"2x alert failed for chat={chat_id} ca={ca}:", err)
+
+        leaderboard.update_best(chat_id, ca, mc)
 
     return {"lb_checked": checked}
 
