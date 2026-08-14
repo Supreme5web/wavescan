@@ -138,6 +138,30 @@ def update_best(chat_id, ca: str, mc: float) -> None:
         print("leaderboard update_best failed:", err)
 
 
+def calls_since(chat_id, since_iso: str, limit: int = 200):
+    """All calls logged in this chat at/after since_iso (ISO 8601 UTC),
+    for the period-filtered /leaderboard view."""
+    if not available():
+        return []
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/calls",
+            headers=_headers(),
+            params={
+                "chat_id": f"eq.{chat_id}",
+                "called_at": f"gte.{since_iso}",
+                "select": "user_id,username,first_name,ca,symbol,entry_mc,best_mc,called_at",
+                "order": "multiple.desc",
+                "limit": limit,
+            },
+            timeout=_TIMEOUT,
+        )
+        return r.json() if r.ok else []
+    except Exception as err:
+        print("leaderboard calls_since failed:", err)
+        return []
+
+
 def top_callers(chat_id, limit: int = 15):
     """Every call logged in this chat, ranked by multiplier desc."""
     if not available():

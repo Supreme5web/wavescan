@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import datetime, timedelta, timezone
 
 import leaderboard
 import pnl_card
@@ -269,31 +270,69 @@ def _mention_row(row: dict) -> str:
     return escape_md(row.get("first_name") or "trader")
 
 
-def handle_leaderboard(chat_id, message_id, chat_type):
+LB_PERIODS = {"1h": 1, "4h": 4, "12h": 12, "1d": 24}
+LB_DEFAULT_PERIOD = "1d"
+
+
+def _leaderboard_keyboard(period: str):
+    return {"inline_keyboard": [[
+        {"text": f"• {p} •" if p == period else p, "callback_data": f"lb:{p}"}
+        for p in LB_PERIODS
+    ]]}
+
+
+def _build_leaderboard_message(chat_id, period: str) -> str:
+    hours = LB_PERIODS.get(period, LB_PERIODS[LB_DEFAULT_PERIOD])
+    since_iso = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    calls = leaderboard.calls_since(chat_id, since_iso)
+    if not calls:
+        return f"📊 No calls tracked in the last {escape_md(period)}\\. Post a contract address in this chat to get on the board\\!"
+
+    scored = []
+    for row in calls:
+        entry_mc = row.get("entry_mc") or 0
+        best_mc = row.get("best_mc") or 0
+        mult = (best_mc / entry_mc) if entry_mc else 0
+        scored.append((mult, row))
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    total = len(scored)
+    hits = sum(1 for m, _ in scored if m >= 2)
+    hit_rate = (hits / total * 100) if total else 0
+    avg_mult = (sum(m for m, _ in scored) / total) if total else 0
+    top_mult, top_row = scored[0]
+
+    top10 = scored[:10]
+    lines = [
+        "👑 *TOP CALLER*",
+        f"└ 🥇 {_mention_row(top_row)}",
+        "",
+        "📊 *GROUP PERFORMANCE*",
+        f"├ ⏱️ Period · {escape_md(period)}",
+        f"├ 📞 Calls · {total}",
+        f"├ 🎯 Hit Rate · {hit_rate:.0f}% ≥2x",
+        f"└ 💰 Return · {escape_md(f'{top_mult:.1f}x')} · Avg {escape_md(f'{avg_mult:.1f}x')}",
+        "",
+        "🔥 *TOP CALLS*",
+    ]
+    for i, (mult, row) in enumerate(top10):
+        prefix = "└" if i == len(top10) - 1 else "├"
+        symbol = row.get("symbol") or "UNKNOWN"
+        lines.append(
+            f"{prefix} 🟣 {escape_md(symbol)} » {_mention_row(row)} \\· {escape_md(f'{mult:.1f}x')}"
+        )
+    return "\n".join(lines)
+
+
+def handle_leaderboard(chat_id, message_id, chat_type, period: str = LB_DEFAULT_PERIOD):
     if chat_type not in GROUP_CHAT_TYPES:
         send_message(chat_id, "🏆 The leaderboard only tracks calls made in group chats\\.", message_id)
         return
     if not leaderboard.available():
         send_message(chat_id, "⚠️ The leaderboard isn't configured on this deployment \\(missing Supabase env vars\\)\\.", message_id)
         return
-
-    rows = leaderboard.top_callers(chat_id)
-    if not rows:
-        send_message(chat_id, "No calls tracked yet\\. Post a contract address in this chat to get on the board\\!", message_id)
-        return
-
-    medals = ["🥇", "🥈", "🥉"]
-    lines = ["🏆 *TOP CALLERS*", "━" * 22]
-    for i, row in enumerate(rows):
-        rank = medals[i] if i < 3 else f"{i + 1}\\."
-        entry_mc = row.get("entry_mc") or 0
-        mult = (row.get("best_mc") or 0) / entry_mc if entry_mc else 0
-        symbol = row.get("symbol") or "UNKNOWN"
-        lines.append(
-            f"{rank} {_mention_row(row)} — *${escape_md(symbol)}* "
-            f"`{escape_md(f'{mult:.1f}x')}`"
-        )
-    send_message(chat_id, "\n".join(lines), message_id)
+    text = _build_leaderboard_message(chat_id, period)
+    send_message(chat_id, text, message_id, _leaderboard_keyboard(period))
 
 
 def handle_pnl(chat_id, text, message_id):
@@ -365,6 +404,24 @@ def handle_callback(callback_query: dict):
             answer_callback_query(cq_id, "🗑️ Deleted")
         else:
             answer_callback_query(cq_id, "⚠️ Couldn't delete \\(bot may lack permission here\\)", show_alert=True)
+        return
+
+    if data.startswith("lb:"):
+        period = data[len("lb:"):]
+        if period not in LB_PERIODS:
+            answer_callback_query(cq_id, "⚠️ Unknown period", show_alert=True)
+            return
+        if not leaderboard.available() or not chat_id or not message_id:
+            answer_callback_query(cq_id, "⚠️ Leaderboard not configured", show_alert=True)
+            return
+        text = _build_leaderboard_message(chat_id, period)
+        result = edit_message_text(chat_id, message_id, text, _leaderboard_keyboard(period))
+        if result is None:
+            answer_callback_query(cq_id, f"✅ Already on {period}")
+        elif result:
+            answer_callback_query(cq_id, f"📊 {period}")
+        else:
+            answer_callback_query(cq_id, "⚠️ Couldn't switch, try again", show_alert=True)
         return
 
     if not data.startswith("refresh:"):
