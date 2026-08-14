@@ -62,17 +62,22 @@ def _social_links_line(pair: dict) -> str:
 
 
 def _fmt_top_holders(ca: str, chain_id: str):
-    """Top 5 individual holder percentages, plus the top-10 total for the
-    bracket. Solana-only (RPC-based); returns (None, None) otherwise/on
-    failure so the caller can show N/A instead of a wrong number."""
+    """Top 5 individual holder percentages (each linked to its wallet on
+    Solscan), plus the top-10 total for the bracket. Solana-only
+    (RPC-based); returns (None, None) otherwise/on failure so the caller
+    can show N/A instead of a wrong number."""
     if chain_id != "solana":
         return None, None
-    percentages = solana.get_top_holder_percentages(ca)
-    if not percentages:
+    holders = solana.get_top_holders(ca)
+    if not holders:
         return None, None
-    top5 = percentages[:5]
-    values = " \\| ".join(f"{p:.1f}" for p in top5)
-    top10_total = sum(percentages)
+    top5 = holders[:5]
+    values = " \\| ".join(
+        f"[{escape_md(f'{p:.1f}')}]({escape_url(f'https://solscan.io/account/{addr}')})"
+        if addr else escape_md(f"{p:.1f}")
+        for addr, p in top5
+    )
+    top10_total = sum(p for _, p in holders)
     return values, top10_total
 
 
@@ -104,25 +109,29 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     dev_status = "Hold 🚫" if dev_pct > 0 else "Sold✅"
     wallet_short = f"{dev_wallet[:4]}...{dev_wallet[-4:]}" if len(dev_wallet) > 10 else (dev_wallet or "N/A")
     paid_line = "✅ Paid" if dex_paid else "❌ Not Paid"
+    wallet_link = (
+        f"[{escape_md(wallet_short)}]({escape_url(f'https://solscan.io/account/{dev_wallet}')})"
+        if dev_wallet else escape_md(wallet_short)
+    )
 
     lines = [
         f"💸 *\\(${escape_md(symbol)}\\)* {escape_md(name)} \\| ⌛{escape_md(age)} \\| {escape_md(dex)}",
         "",
-        f"┏ MC:      `{format_usd_short(mc)}` \\(ATH `{format_usd_short(ath_mc)}`\\)",
-        f"┣ Price:   `{format_price(price)}`",
-        f"┣ LP:      `{format_usd_short(liq)}`",
-        f"┣ Vol:     `{format_usd_short(vol24)}`",
-        f"┣1H:      `{format_usd_short(vol1h)}`",
+        f"┏ MC:      *{escape_md(format_usd_short(mc))}* \\(ATH *{escape_md(format_usd_short(ath_mc))}*\\)",
+        f"┣ Price:   *{escape_md(format_price(price))}*",
+        f"┣ LP:      *{escape_md(format_usd_short(liq))}*",
+        f"┣ Vol:     *{escape_md(format_usd_short(vol24))}*",
+        f"┣1H:      *{escape_md(format_usd_short(vol1h))}*",
         (
-            f"┗ TH:      `{th}` `[{top10_total:.0f}%]`"
+            f"┗ TH:      {th} *\\[{top10_total:.0f}%\\]*"
             if th is not None
-            else "┗ TH:      `N/A`"
+            else "┗ TH:      *N/A*"
         ),
         "",
         "👨‍💻 *Dev*",
-        "┏ Status     " + escape_md(dev_status),
-        "┣ Wallet      `" + escape_md(wallet_short) + "`",
-        "┗ DEX Paid    " + escape_md(paid_line),
+        "┏ Status     *" + escape_md(dev_status) + "*",
+        "┣ Wallet      " + wallet_link,
+        "┗ DEX Paid    *" + escape_md(paid_line) + "*",
     ]
 
     socials_line = _social_links_line(pair)

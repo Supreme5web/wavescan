@@ -41,11 +41,11 @@ CONTENT_LEFT_F = 80 / 1672
 COL2_X_F = 561 / 1672
 CONTENT_RIGHT_F = 1592 / 1672
 HEADER_BOTTOM_F = 227 / 941
-DIVIDER_Y_F = 407 / 941
-LABEL_TOP_F = 272 / 941
-VALUE_TOP_F = 330 / 941
-CAPTION_TOP_F = 445 / 941
-LOGO_SIZE_F = 40 / 941
+DIVIDER_Y_F = 440 / 941
+LABEL_TOP_F = 305 / 941
+VALUE_TOP_F = 363 / 941
+CAPTION_TOP_F = 478 / 941
+LOGO_SIZE_F = 64 / 941
 
 
 def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
@@ -162,7 +162,7 @@ def generate_pnl_card(call: dict) -> str:
     name_x = logo_box[2] + 14
     name_max_w = col2_x - name_x - 20
     name_text = f"{call['token_name']} (${call['token_symbol'].upper()})"
-    name_font = _fit_text(draw, name_text, FONT_BOLD, name_max_w, 30)
+    name_font = _fit_text(draw, name_text, FONT_BOLD, name_max_w, 46)
     name_display = _truncate_to_width(draw, name_text, name_font, name_max_w)
     name_y = logo_box[1] + (logo_size - name_font.size) / 2 - 2
     draw.text((name_x, name_y), name_display, font=name_font, fill=WHITE)

@@ -40,8 +40,8 @@ def get_largest_accounts(mint: str):
     return result.get("value") if result else None
 
 
-def get_top_holder_percentages(mint: str):
-    """List of the top 10 holders' individual % of supply, largest first,
+def get_top_holders(mint: str):
+    """List of (address, pct) for the top 10 holders, largest first,
     excluding the presumed LP/vault (rank 1 on a live pool is virtually
     always the pool itself). Returns None on failure."""
     supply = get_token_supply(mint)
@@ -53,7 +53,13 @@ def get_top_holder_percentages(mint: str):
         return None
     ranked = sorted(largest, key=lambda a: float(a.get("amount") or 0), reverse=True)
     top10 = ranked[1:11]
-    return [float(a.get("uiAmount") or 0) / total * 100 for a in top10]
+    return [(a.get("address"), float(a.get("uiAmount") or 0) / total * 100) for a in top10]
+
+
+def get_top_holder_percentages(mint: str):
+    """List of the top 10 holders' individual % of supply. Returns None on failure."""
+    holders = get_top_holders(mint)
+    return [pct for _, pct in holders] if holders is not None else None
 
 
 def get_top10_concentration(mint: str):
