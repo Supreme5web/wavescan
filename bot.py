@@ -112,7 +112,7 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     lines = [
         f"💸 *(${escape_md(symbol)})* {escape_md(name)} | ⌛{escape_md(age)} | {escape_md(dex)}",
         "",
-        f"┏💰 MC: `{format_usd_short(mc)}` (ATH `{format_usd_short(ath_mc)}`)",
+        f"┏💰 MC: `{format_usd_short(mc)}` \\(ATH `{format_usd_short(ath_mc)}`\\)",
         f"├ 💵 Price: `{format_price(price)}`",
         f"├ 💧 Liquidity: `{format_usd_short(liq) if liq else 'N/A'}`",
         f"├📊 Vol: `{format_usd_short(vol24)}`",
