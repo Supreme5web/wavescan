@@ -1,15 +1,12 @@
-"""Generates a WaveScan call-PNL card image: shows the multiplier a called
-token has done since it was first posted (entry mc) up to its peak (best
-mc) tracked by the leaderboard, plus who called it.
+"""Generates a WaveScan call-PNL card image on top of the new
+assets/pnl_card_template.png background (1672x941, WaveScan-branded, with a
+divider baked into the art). Layout, top to bottom:
 
-Layout (on top of assets/pnl_card_template.png):
-    [logo] TOKEN NAME                              12.4X   <- big, right side
-           $SYMBOL
-    ------------------------------------------------------
-    CALLED AT              REACHED
-    $5.00K                 $400.00K
-    ------------------------------------------------------
-                     Called by @username
+    [logo]TOKEN NAME ($SYM)              <- small identity row
+    CALLED AT              REACHED   X.XXX  <- stats row + big multiplier
+    ------------------------------------------------------  <- template art
+    Called by @username
+    [big WaveScan wordmark / chart art, baked into the template]
 """
 
 import io
@@ -34,10 +31,21 @@ LABEL_GRAY = (148, 168, 200, 255)
 GREEN = (52, 211, 153, 255)
 RED = (248, 113, 113, 255)
 CYAN = (56, 189, 248, 255)
-DIVIDER_COLOR = (90, 120, 170, 130)
 
-CONTENT_LEFT = 80
-LOGO_SIZE = 120
+# Layout fractions measured against the template's native 1672x941 art:
+# header underline ~y=227, stats divider (baked into the template) ~y=407,
+# "CALLED AT" column at x=80, "REACHED" column at x=561, content right edge
+# ~x=1592. Expressed as fractions so the layout still holds if the template
+# is ever swapped for a differently-sized version with the same proportions.
+CONTENT_LEFT_F = 80 / 1672
+COL2_X_F = 561 / 1672
+CONTENT_RIGHT_F = 1592 / 1672
+HEADER_BOTTOM_F = 227 / 941
+DIVIDER_Y_F = 407 / 941
+LABEL_TOP_F = 272 / 941
+VALUE_TOP_F = 330 / 941
+CAPTION_TOP_F = 445 / 941
+LOGO_SIZE_F = 40 / 941
 
 
 def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
@@ -45,7 +53,7 @@ def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
 
 
 def _fmt_compact(value) -> str:
-    """$1.24M, $850.0K, $5.00K style formatting for market caps."""
+    """$1.24M, $850.00K, $5.00K style formatting for market caps."""
     v = float(value or 0)
     if v >= 1_000_000_000:
         return f"${v / 1_000_000_000:.2f}B"
@@ -64,7 +72,7 @@ def _fmt_mult(mult: float) -> str:
     return f"{mult:.2f}X"
 
 
-def _fit_text(draw, text, font_path, max_width, start_size, min_size=24):
+def _fit_text(draw, text, font_path, max_width, start_size, min_size=18):
     size = start_size
     while size > min_size:
         font = _font(font_path, size)
@@ -104,19 +112,13 @@ def _fetch_logo(logo_url: Optional[str], size: int) -> Optional[Image.Image]:
 
 def _draw_logo_placeholder(draw, box, symbol: str) -> None:
     x0, y0, x1, y1 = box
-    draw.ellipse(box, fill=(20, 40, 80, 255), outline=CYAN, width=3)
+    draw.ellipse(box, fill=(20, 40, 80, 255), outline=CYAN, width=2)
     letter = (symbol or "?")[0].upper()
-    font = _font(FONT_BOLD, int((x1 - x0) * 0.5))
+    font = _font(FONT_BOLD, int((x1 - x0) * 0.55))
     bbox = draw.textbbox((0, 0), letter, font=font)
     w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
     cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
     draw.text((cx - w / 2 - bbox[0], cy - h / 2 - bbox[1]), letter, font=font, fill=WHITE)
-
-
-def _draw_accent_line(draw, x, y, width=32, thickness=3) -> None:
-    glow_color = (CYAN[0], CYAN[1], CYAN[2], 70)
-    draw.line((x, y, x + width, y), fill=glow_color, width=thickness + 4)
-    draw.line((x, y, x + width, y), fill=CYAN, width=thickness)
 
 
 def generate_pnl_card(call: dict) -> str:
@@ -130,7 +132,6 @@ def generate_pnl_card(call: dict) -> str:
     """
     base = Image.open(TEMPLATE_PATH).convert("RGBA")
     W, H = base.size
-    content_right = int(W * 0.56)  # keep clear of the template's right-side art
     overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
@@ -139,32 +140,50 @@ def generate_pnl_card(call: dict) -> str:
     mult = (best_mc / entry_mc) if entry_mc else 0.0
     accent = GREEN if mult >= 1 else RED
 
-    # --- Token identity (logo + name/symbol), top-left ----------------------
-    x = CONTENT_LEFT
-    y = 90
-    logo_box = (x, y, x + LOGO_SIZE, y + LOGO_SIZE)
-    logo_img = _fetch_logo(call.get("logo_url"), LOGO_SIZE)
+    content_left = int(W * CONTENT_LEFT_F)
+    col2_x = int(W * COL2_X_F)
+    content_right = int(W * CONTENT_RIGHT_F)
+    header_bottom = int(H * HEADER_BOTTOM_F)
+    divider_y = int(H * DIVIDER_Y_F)
+    label_top = int(H * LABEL_TOP_F)
+    value_top = int(H * VALUE_TOP_F)
+    caption_top = int(H * CAPTION_TOP_F)
+    logo_size = max(28, int(H * LOGO_SIZE_F))
+
+    # --- Token identity, small row in the gap above the stats ---------------
+    logo_box = (content_left, header_bottom + 6, content_left + logo_size, header_bottom + 6 + logo_size)
+    logo_img = _fetch_logo(call.get("logo_url"), logo_size)
     if logo_img is not None:
-        overlay.paste(logo_img, (x, y), logo_img)
-        draw.ellipse(logo_box, outline=CYAN, width=3)
+        overlay.paste(logo_img, (logo_box[0], logo_box[1]), logo_img)
+        draw.ellipse(logo_box, outline=CYAN, width=2)
     else:
         _draw_logo_placeholder(draw, logo_box, call["token_symbol"])
 
-    text_x = x + LOGO_SIZE + 24
-    max_name_width = content_right - text_x
-    name_font = _fit_text(draw, call["token_name"], FONT_BOLD, max_name_width, 58, min_size=32)
-    name_display = _truncate_to_width(draw, call["token_name"], name_font, max_name_width)
-    draw.text((text_x, y + 8), name_display, font=name_font, fill=WHITE)
-    symbol_font = _font(FONT_REGULAR, 32)
-    draw.text((text_x, y + 66), f"${call['token_symbol'].upper()}", font=symbol_font, fill=LABEL_GRAY)
+    name_x = logo_box[2] + 14
+    name_max_w = col2_x - name_x - 20
+    name_text = f"{call['token_name']} (${call['token_symbol'].upper()})"
+    name_font = _fit_text(draw, name_text, FONT_BOLD, name_max_w, 30)
+    name_display = _truncate_to_width(draw, name_text, name_font, name_max_w)
+    name_y = logo_box[1] + (logo_size - name_font.size) / 2 - 2
+    draw.text((name_x, name_y), name_display, font=name_font, fill=WHITE)
 
-    # --- Big multiplier, right side, vertically centered on the header ------
+    # --- CALLED AT / REACHED --------------------------------------------------
+    label_font = _font(FONT_REGULAR, 26)
+    value_font = _font(FONT_BOLD, 56)
+
+    draw.text((content_left, label_top), "CALLED AT", font=label_font, fill=LABEL_GRAY)
+    draw.text((content_left, value_top), _fmt_compact(entry_mc), font=value_font, fill=WHITE)
+
+    draw.text((col2_x, label_top), "REACHED", font=label_font, fill=LABEL_GRAY)
+    draw.text((col2_x, value_top), _fmt_compact(best_mc), font=value_font, fill=accent)
+
+    # --- Big multiplier, right-aligned, vertically centered in the band ------
     mult_text = _fmt_mult(mult)
-    mult_font = _fit_text(draw, mult_text, FONT_BOLD, W - content_right - 60, 150, min_size=70)
+    mult_font = _fit_text(draw, mult_text, FONT_BOLD, content_right - col2_x - 260, 150, min_size=60)
     mbbox = draw.textbbox((0, 0), mult_text, font=mult_font)
     mw, mh = mbbox[2] - mbbox[0], mbbox[3] - mbbox[1]
-    mx = W - 70 - mw
-    my = y + (LOGO_SIZE - mh) / 2 - mbbox[1]
+    mx = content_right - mw
+    my = (header_bottom + divider_y) / 2 - mh / 2 - mbbox[1]
     # subtle glow behind the multiplier for readability over busy art
     glow = Image.new("RGBA", overlay.size, (0, 0, 0, 0))
     ImageDraw.Draw(glow).text((mx, my), mult_text, font=mult_font, fill=(*accent[:3], 90))
@@ -172,38 +191,12 @@ def generate_pnl_card(call: dict) -> str:
     overlay.alpha_composite(glow)
     draw.text((mx, my), mult_text, font=mult_font, fill=accent)
 
-    # --- Divider --------------------------------------------------------------
-    y += LOGO_SIZE + 44
-    draw.line((x, y, W - 70, y), fill=DIVIDER_COLOR, width=2)
-
-    # --- Called at / Reached row ----------------------------------------------
-    y += 44
-    label_font = _font(FONT_REGULAR, 32)
-    value_font = _font(FONT_BOLD, 64)
-    col2_x = x + int((content_right - x) * 0.55)
-
-    draw.text((x, y), "CALLED AT", font=label_font, fill=LABEL_GRAY)
-    _draw_accent_line(draw, x, y + label_font.size + 4)
-    draw.text((x, y + 48), _fmt_compact(entry_mc), font=value_font, fill=WHITE)
-
-    draw.text((col2_x, y), "REACHED", font=label_font, fill=LABEL_GRAY)
-    _draw_accent_line(draw, col2_x, y + label_font.size + 4)
-    draw.text((col2_x, y + 48), _fmt_compact(best_mc), font=value_font, fill=accent)
-
-    # --- Divider below the stats ------------------------------------------
-    y += 130
-    draw.line((x, y, W - 70, y), fill=DIVIDER_COLOR, width=2)
-
-    # --- Caller username, centered below the card content -------------------
+    # --- Caller, on the strip just below the template's divider --------------
     username = call.get("username")
     if username:
         handle = username if str(username).startswith("@") else f"@{username}"
-        caller_text = f"Called by {handle}"
-        uname_font = _font(FONT_BOLD, 36)
-        text_w = draw.textlength(caller_text, font=uname_font)
-        ux = (W - text_w) / 2
-        uy = y + 26
-        draw.text((ux, uy), caller_text, font=uname_font, fill=CYAN)
+        caption_font = _font(FONT_BOLD, 32)
+        draw.text((content_left, caption_top), f"Called by {handle}", font=caption_font, fill=CYAN)
 
     # --- Composite + save -----------------------------------------------------
     final_img = Image.alpha_composite(base, overlay).convert("RGB")
