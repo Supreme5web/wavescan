@@ -164,11 +164,15 @@ def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
         send_message(chat_id, f"❌ No pair found for `{escape_md(truncate_ca(ca))}`", message_id)
         return
 
-    if user and user.get("id") and leaderboard.available():
+    if leaderboard.available():
         mc = get_market_cap(pair)
-        symbol = ((pair.get("baseToken") or {}).get("symbol") or "UNKNOWN").upper()
-        if not leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId"), mc):
-            print(f"leaderboard record_call did not persist for chat={chat_id} ca={ca} mc={mc}")
+        if user and user.get("id"):
+            symbol = ((pair.get("baseToken") or {}).get("symbol") or "UNKNOWN").upper()
+            if not leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId"), mc):
+                print(f"leaderboard record_call did not persist for chat={chat_id} ca={ca} mc={mc}")
+        # Ratchet best_mc using this live lookup too, not just the periodic
+        # sweep, so /pnl and /leaderboard reflect the current price sooner.
+        leaderboard.update_best(chat_id, ca, mc)
 
     caption = _build_token_message(pair, ca, chat_id)
     keyboard = _action_keyboard(ca)
@@ -299,13 +303,22 @@ def handle_pnl(chat_id, text, message_id):
 
     caller_handle = call.get("username") or call.get("first_name")
 
+    # Use this fresh lookup to ratchet best_mc too, so the card reflects the
+    # live price instead of a stale value if the periodic sweep hasn't run.
+    best_mc = float(call["best_mc"])
+    if pair:
+        live_mc = get_market_cap(pair)
+        if live_mc > best_mc:
+            best_mc = live_mc
+            leaderboard.update_best(chat_id, ca, live_mc)
+
     path = None
     try:
         path = pnl_card.generate_pnl_card({
             "token_name": token_name,
             "token_symbol": token_symbol,
             "entry_mc": call["entry_mc"],
-            "best_mc": call["best_mc"],
+            "best_mc": best_mc,
             "username": caller_handle,
             "logo_url": logo_url,
         })

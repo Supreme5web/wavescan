@@ -62,7 +62,11 @@ def fetch_best_pair(ca: str):
             or (pool.get("txns") or {}).get("volume24h")
             or 0
         )
-        vol1h = float(search.get("volume_1h") or 0)
+        vol1h = float(
+            search.get("volume_1h")
+            or (pool.get("txns") or {}).get("volume1h")
+            or 0
+        )
         buys1h = int(search.get("buys") or 0)
         sells1h = int(search.get("sells") or 0)
 
