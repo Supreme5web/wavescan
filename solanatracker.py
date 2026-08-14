@@ -71,6 +71,24 @@ def fetch_market_cap(mint: str) -> float:
     return 0.0
 
 
+def fetch_token_stats(mint: str):
+    """Return Solana Tracker timeframe stats for a token, or {} on failure."""
+    if not available() or not mint:
+        return {}
+    try:
+        r = requests.get(
+            f"{SOLANATRACKER_API}/stats/{mint}",
+            headers=_headers(),
+            timeout=_TIMEOUT,
+        )
+        if not r.ok:
+            return {}
+        return r.json() or {}
+    except Exception as err:
+        print("solanatracker fetch_token_stats failed:", err)
+        return {}
+
+
 def fetch_ath(mint: str):
     """(ath_price, ath_market_cap) since Solana Tracker started recording
     this token, or (0, 0) on failure/unavailable/not-yet-indexed."""

@@ -10,7 +10,7 @@ A lean Telegram bot for token lookups and market-cap alerts. Market/token data c
 - `/cancel <ca>` — cancel an alert
 - `/leaderboard` (or `/lb`) — in groups, ranks callers by the best multiplier (peak mc ÷ mc at time of call) any of their calls has reached
 - `/ping` — liveness check
-- Pasting a bare contract address also runs `/data` on it, and — in groups — logs it as a call for the leaderboard
+- Pasting a bare contract address scans it directly and — in groups — logs it as a call for the leaderboard
 
 ## Deploy on Render — single free Web Service
 
@@ -27,8 +27,7 @@ via an HTTP endpoint you trigger externally, instead of a paid Render cron.
    - `TELEGRAM_BOT_TOKEN` — from [@BotFather](https://t.me/BotFather)
    - `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` — from an [Upstash](https://upstash.com) Redis database (free tier is fine; this is where alerts are stored). Without these, bare CA lookups and `/ping` still work, but `/alert` will tell users alerts aren't configured.
    - `CRON_SECRET` — any random string you make up, so strangers can't trigger your sweep endpoint.
-   - `HELIUS_API_KEY` — from [Helius](https://helius.dev). Used for Solana holder-count / top-10 concentration lookups instead of the public RPC (higher rate limits, more reliable). Optional — without it, the bot falls back to the public Solana RPC.
-   - `SOLANATRACKER_API_KEY` — from [Solana Tracker](https://www.solanatracker.io/account). Used for two things on Solana tokens: (1) the `ATH:` figure on `/data`, sourced from Solana Tracker's own tracked all-time-high instead of a DexPaprika candle lookback, and (2) a market-cap fallback when Dexscreener hasn't populated `fdv`/`marketCap` yet (common on pairs that are only seconds/minutes old) — without this fallback a fresh scan of a brand-new pair can have `mc = 0` and silently fail to log a leaderboard/PNL call. Optional — without it, ATH falls back to the DexPaprika lookback and the mc fallback is skipped.
+   - `SOLANATRACKER_API_KEY` — from [Solana Tracker](https://www.solanatracker.io/account). Used for token market data, timeframe stats, holders, and ATH data.
    - `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` — from a [Supabase](https://supabase.com) project (Project Settings → API; use the **service_role** key, not `anon`, since the bot writes from the server). Without these, everything else still works, but `/leaderboard` will tell users it isn't configured. Run this once in the Supabase SQL editor first:
      ```sql
      create table calls (

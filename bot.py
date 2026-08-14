@@ -4,7 +4,6 @@ import time
 import leaderboard
 import pnl_card
 import pnl_lookup
-import solana
 import storage
 from config import BOT_NAME
 from market import fetch_best_pair, get_ath_mc, get_market_cap
@@ -14,7 +13,7 @@ from telegram import (
 )
 from utils import (
     escape_md, escape_url, format_usd_short, format_price, format_pct,
-    format_age, risk_label, truncate_ca, parse_mc, find_ca, CA_RE,
+    format_age, truncate_ca, parse_mc, find_ca, CA_RE,
 )
 
 ALERT_KEY = "alert:{chat_id}:{ca}:{user_id}"
@@ -96,13 +95,11 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     # All-time-high market cap from Solana Tracker's indexed /ath endpoint.
     ath_mc = get_ath_mc(pair, mc)
 
-    # Holder concentration is only computable for Solana here, via free
-    # public RPC (no paid indexer) — omitted entirely for other chains or on
-    # RPC failure/timeout rather than showing a guessed number.
-    holders = top10_pct = None
-    if chain_id == "solana":
-        holders = solana.get_holder_count(ca)
-        top10_pct = solana.get_top10_concentration(ca)
+    holders = pair.get("holders")
+    info = pair.get("info") or {}
+
+    # All-time-high market cap from Solana Tracker's indexed /ath endpoint.
+    ath_mc = get_ath_mc(pair, mc)
 
 
     change_arrow = "🟢" if change24 >= 0 else "🔴"
@@ -127,14 +124,8 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
         f"├ 🔄 1H Trades: `🔴{sells1h:,}/🟢{buys1h:,}`",
     ]
     if holders is not None:
-        lines.append(f"├ 👥 Holders: `{holders}`")
+        lines.append(f"├ 👥 Holders: `{int(holders):,}`")
     lines.append(f"├ ⏱️ Age: `{format_age(created_ms)}`")
-
-    if top10_pct is not None:
-        _, label = risk_label(top10_pct)
-        lines.append(f"├ 🐳 Top 10: `{top10_pct:.1f}%` \\({escape_md(label)}\\)")
-
-    lines.append("└ 📡 Data: `Solana Tracker`")
 
     lines += ["", f" `{ca}`"]
 
@@ -142,7 +133,15 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
         first_call = pnl_lookup.get_first_call(chat_id, ca)
         if first_call:
             scanner = first_call.get("username") or first_call.get("first_name") or "someone"
-            lines += ["", f"1st scanned by {escape_md(scanner)} @ {escape_md(_fmt_plain_compact(first_call['entry_mc']))}"]
+            entry_mc = float(first_call.get("entry_mc") or 0)
+            increase = ((mc - entry_mc) / entry_mc * 100.0) if entry_mc > 0 else 0.0
+            multiple = (mc / entry_mc) if entry_mc > 0 else 0.0
+            if multiple >= 2.0:
+                progress = f"{multiple:.1f}x" if multiple < 10 else f"{multiple:.0f}x"
+            else:
+                sign = "+" if increase >= 0 else ""
+                progress = f"{sign}{increase:.0f}%"
+            lines += ["", f"1st scanned by {escape_md(scanner)} @ {escape_md(_fmt_plain_compact(entry_mc))} [{escape_md(progress)}]"]
 
     return "\n".join(lines)
 
@@ -157,7 +156,6 @@ def handle_token(chat_id, ca, message_id, user=None, chat_type=None):
         return
 
     # Every direct CA message is a call. Record it before sending the card.
-    # This is independent of the old /data command.
     if user and user.get("id"):
         mc = get_market_cap(pair)
         symbol = ((pair.get("baseToken") or {}).get("symbol") or "UNKNOWN").upper()
