@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import requests
 
 from config import SOLANATRACKER_API, SOLANATRACKER_API_KEY
+from solanatracker import fetch_ath
 
 
 def _headers():
@@ -77,7 +78,13 @@ def fetch_best_pair(ca: str):
         ]
         mc_values = [v for v in mc_values if v > 0]
         mc = float((pool.get("marketCap") or {}).get("usd") or 0)
-        ath_mc = max([mc] + mc_values) if mc_values else mc
+
+        # /tokens/{mint} usually only has one active pool, so mc_values alone
+        # just echoes the current market cap rather than a real peak. The
+        # dedicated /ath endpoint tracks the true highest market cap across
+        # every trade Solana Tracker has indexed for this token.
+        _, ath_from_endpoint = fetch_ath(ca)
+        ath_mc = max([mc, ath_from_endpoint] + mc_values)
 
         change24 = float((events.get("24h") or {}).get("priceChangePercentage") or 0)
         created_ms = int((creation.get("created_time") or 0) * 1000)

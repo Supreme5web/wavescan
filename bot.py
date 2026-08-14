@@ -4,6 +4,7 @@ import time
 import leaderboard
 import pnl_card
 import pnl_lookup
+import solana
 import storage
 from config import BOT_NAME
 from market import fetch_best_pair, get_ath_mc, get_market_cap
@@ -65,19 +66,19 @@ def _social_links_line(pair: dict) -> str:
     return ""
 
 
-def _fmt_change(value) -> str:
-    v = float(value or 0)
-    return f"{v:+.1f}" if v else "0.0"
-
-
-def _fmt_th(pair: dict) -> str:
-    events = pair.get("events") or {}
-    keys = ("5m", "15m", "30m", "1h", "2h")
-    values = []
-    for key in keys:
-        values.append(_fmt_change((events.get(key) or {}).get("priceChangePercentage")))
-    change24 = float((events.get("24h") or {}).get("priceChangePercentage") or 0)
-    return "| ".join(values), change24
+def _fmt_top_holders(ca: str, chain_id: str):
+    """Top 5 individual holder percentages, plus the top-10 total for the
+    bracket. Solana-only (RPC-based); returns (None, None) otherwise/on
+    failure so the caller can show N/A instead of a wrong number."""
+    if chain_id != "solana":
+        return None, None
+    percentages = solana.get_top_holder_percentages(ca)
+    if not percentages:
+        return None, None
+    top5 = percentages[:5]
+    values = "| ".join(f"{p:.1f}" for p in top5)
+    top10_total = sum(percentages)
+    return values, top10_total
 
 
 def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
@@ -99,7 +100,7 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     dev_pct = float(pair.get("devPercentage") or 0)
     dev_wallet = pair.get("devWallet") or ""
     dex_paid = bool(pair.get("dexPaid"))
-    th, change24 = _fmt_th(pair)
+    th, top10_total = _fmt_top_holders(ca, pair.get("chainId"))
 
     age = format_age(created_ms)
     if age == "0m":
@@ -117,7 +118,11 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
         f"├ 💧 Liquidity: `{format_usd_short(liq) if liq else 'N/A'}`",
         f"├📊 Vol: `{format_usd_short(vol24)}`",
         f"├1H: `{format_usd_short(vol1h)}`",
-        f"┗ TH        `{th}` `[{change24:.0f}%]`",
+        (
+            f"┗ TH        `{th}` `[{top10_total:.0f}%]`"
+            if th is not None
+            else "┗ TH        `N/A`"
+        ),
         "",
         "👨‍💻 *Dev*",
         "┏ Status     " + escape_md(dev_status),

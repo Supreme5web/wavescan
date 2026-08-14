@@ -146,7 +146,7 @@ def top_callers(chat_id, limit: int = 10):
             headers=_headers(),
             params={
                 "chat_id": f"eq.{chat_id}",
-                "select": "user_id,username,first_name,symbol,entry_mc,best_mc",
+                "select": "user_id,username,first_name,ca,symbol,entry_mc,best_mc",
                 "order": "multiple.desc",
                 "limit": 50,
             },
