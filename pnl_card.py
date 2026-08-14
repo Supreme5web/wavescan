@@ -1,13 +1,8 @@
-"""Generate a futuristic crypto call-PNL card.
+"""Generate a crypto call PNL card using the new dark HUD UI.
 
-Designed for the 1672x941 WaveScan-style background:
-    assets/pnl_card_template.png
-
-Layout:
-    - Large token logo at the top-left
-    - Large token name/symbol beside the logo
-    - CALLED AT / REACHED / multiplier stats below
-    - Optional "Called by @username" caption below the divider
+Put the supplied `pnl_card_new_ui.png` in your project's `assets/` folder.
+The background contains the frame, circuits, chart, hexagons and multiplier box.
+This file draws the dynamic token logo/name, multiplier, metrics and caller.
 """
 
 import io
@@ -21,64 +16,61 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 logger = logging.getLogger(__name__)
 
-TEMPLATE_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "assets",
-    "pnl_card_template.png",
-)
+BASE_DIR = os.path.dirname(__file__)
+ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 
-FONT_DIR = os.path.join(os.path.dirname(__file__), "assets", "fonts")
+# New UI background. The first path is for a normal project layout.
+TEMPLATE_PATH = os.path.join(ASSETS_DIR, "pnl_card_new_ui.png")
+if not os.path.exists(TEMPLATE_PATH):
+    TEMPLATE_PATH = os.path.join(BASE_DIR, "pnl_card_new_ui.png")
+
+FONT_DIR = os.path.join(ASSETS_DIR, "fonts")
 FONT_BOLD = os.path.join(FONT_DIR, "Rajdhani-Bold.ttf")
 FONT_REGULAR = os.path.join(FONT_DIR, "Rajdhani-Medium.ttf")
 
 WHITE = (255, 255, 255, 255)
-LABEL_GRAY = (148, 168, 200, 255)
-GREEN = (52, 211, 153, 255)
+LABEL_BLUE = (40, 157, 255, 255)
+GREEN = (40, 224, 145, 255)
 RED = (248, 113, 113, 255)
-CYAN = (56, 189, 248, 255)
+CYAN = (35, 190, 255, 255)
 
 # ---------------------------------------------------------------------------
-# Layout for the 1672x941 background
+# Layout for the 1672 x 941 new UI
 # ---------------------------------------------------------------------------
 
-# Large identity section.
-LOGO_LEFT_F = 55 / 1672
-LOGO_TOP_F = 48 / 941
-LOGO_SIZE_F = 245 / 941
+# Header
+LOGO_LEFT = 55
+LOGO_TOP = 48
+LOGO_SIZE = 245
+NAME_LEFT = 325
+NAME_MAX_RIGHT = 1130
 
-NAME_LEFT_F = 325 / 1672
-NAME_TOP_F = 102 / 941
-NAME_RIGHT_F = 1120 / 1672
+# Multiplier box already exists in the background.
+MULT_LEFT = 1130
+MULT_TOP = 285
+MULT_RIGHT = 1580
+MULT_BOTTOM = 445
 
-# Stats section.
-STATS_LEFT_F = 325 / 1672
-COL2_X_F = 710 / 1672
-CONTENT_RIGHT_F = 1580 / 1672
-
-LABEL_TOP_F = 278 / 941
-VALUE_TOP_F = 326 / 941
-
-# Divider/caption area.
-DIVIDER_Y_F = 407 / 941
-CAPTION_LEFT_F = 65 / 1672
-CAPTION_TOP_F = 438 / 941
+# Bottom metrics
+CALLED_X = 295
+REACHED_X = 655
+CALLER_X = 1080
+METRIC_LABEL_Y = 720
+METRIC_VALUE_Y = 765
 
 
-def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
+def _font(path: str, size: int):
     return ImageFont.truetype(path, size)
 
 
 def _fmt_compact(value) -> str:
-    """Format market caps as $1.24M, $850.00K, etc."""
     v = float(value or 0)
-
     if v >= 1_000_000_000:
         return f"${v / 1_000_000_000:.2f}B"
     if v >= 1_000_000:
         return f"${v / 1_000_000:.2f}M"
     if v >= 1_000:
         return f"${v / 1_000:.2f}K"
-
     return f"${v:,.0f}"
 
 
@@ -90,516 +82,246 @@ def _fmt_mult(mult: float) -> str:
     return f"{mult:.2f}X"
 
 
-def _fit_text(
-    draw,
-    text: str,
-    font_path: str,
-    max_width: int,
-    start_size: int,
-    min_size: int = 18,
-):
+def _fit_text(draw, text, font_path, max_width, start_size, min_size=18):
     size = start_size
-
     while size > min_size:
         font = _font(font_path, size)
-
         if draw.textlength(text, font=font) <= max_width:
             return font
-
         size -= 2
-
     return _font(font_path, min_size)
 
 
-def _truncate_to_width(draw, text: str, font, max_width: int) -> str:
-    if draw.textlength(text, font=font) <= max_width:
-        return text
-
-    ellipsis = "…"
-    trimmed = text
-
-    while trimmed and draw.textlength(
-        trimmed + ellipsis,
-        font=font,
-    ) > max_width:
-        trimmed = trimmed[:-1]
-
-    return trimmed + ellipsis if trimmed else ellipsis
-
-
-def _fetch_logo(
-    logo_url: Optional[str],
-    size: int,
-) -> Optional[Image.Image]:
-    """Download and crop the token logo into a circular image."""
+def _fetch_logo(logo_url: Optional[str], size: int) -> Optional[Image.Image]:
     if not logo_url:
         return None
 
     try:
-        resp = requests.get(logo_url, timeout=6)
-        resp.raise_for_status()
-
-        logo = Image.open(
-            io.BytesIO(resp.content)
-        ).convert("RGBA")
-
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Could not fetch token logo from %s: %s",
-            logo_url,
-            exc,
-        )
+        response = requests.get(logo_url, timeout=6)
+        response.raise_for_status()
+        logo = Image.open(io.BytesIO(response.content)).convert("RGBA")
+    except Exception as exc:
+        logger.warning("Could not fetch token logo: %s", exc)
         return None
 
-    logo = logo.resize(
-        (size, size),
-        Image.LANCZOS,
-    )
+    logo = logo.resize((size, size), Image.LANCZOS)
 
-    mask = Image.new(
-        "L",
-        (size, size),
-        0,
-    )
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
 
-    ImageDraw.Draw(mask).ellipse(
-        (0, 0, size, size),
-        fill=255,
-    )
-
-    circular = Image.new(
-        "RGBA",
-        (size, size),
-        (0, 0, 0, 0),
-    )
-
-    circular.paste(
-        logo,
-        (0, 0),
-        mask,
-    )
-
+    circular = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    circular.paste(logo, (0, 0), mask)
     return circular
 
 
-def _draw_logo_placeholder(
-    draw,
-    box,
-    symbol: str,
-) -> None:
-    """Fallback token logo when logo_url is unavailable."""
-    x0, y0, x1, y1 = box
-
-    draw.ellipse(
-        box,
-        fill=(8, 20, 45, 255),
-        outline=CYAN,
-        width=5,
+def _draw_logo(draw, overlay, logo_url, symbol):
+    box = (
+        LOGO_LEFT,
+        LOGO_TOP,
+        LOGO_LEFT + LOGO_SIZE,
+        LOGO_TOP + LOGO_SIZE,
     )
 
-    letter = (symbol or "?")[0].upper()
+    logo = _fetch_logo(logo_url, LOGO_SIZE)
 
-    font = _font(
-        FONT_BOLD,
-        int((x1 - x0) * 0.50),
-    )
+    if logo:
+        overlay.paste(logo, (LOGO_LEFT, LOGO_TOP), logo)
+    else:
+        draw.ellipse(box, fill=(8, 20, 45, 255))
+        letter = (symbol or "?")[0].upper()
+        font = _font(FONT_BOLD, 110)
+        bbox = draw.textbbox((0, 0), letter, font=font)
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
+        draw.text(
+            (
+                LOGO_LEFT + (LOGO_SIZE - w) / 2 - bbox[0],
+                LOGO_TOP + (LOGO_SIZE - h) / 2 - bbox[1],
+            ),
+            letter,
+            font=font,
+            fill=WHITE,
+        )
 
-    bbox = draw.textbbox(
-        (0, 0),
-        letter,
-        font=font,
-    )
-
-    w = bbox[2] - bbox[0]
-    h = bbox[3] - bbox[1]
-
-    cx = (x0 + x1) / 2
-    cy = (y0 + y1) / 2
-
-    draw.text(
-        (
-            cx - w / 2 - bbox[0],
-            cy - h / 2 - bbox[1],
-        ),
-        letter,
-        font=font,
-        fill=WHITE,
-    )
-
-
-def _draw_glowing_logo_border(
-    overlay: Image.Image,
-    box,
-) -> None:
-    """Add the neon-blue ring around the large token logo."""
-    glow = Image.new(
-        "RGBA",
-        overlay.size,
-        (0, 0, 0, 0),
-    )
-
-    glow_draw = ImageDraw.Draw(glow)
-
-    glow_draw.ellipse(
-        box,
-        outline=(*CYAN[:3], 180),
-        width=10,
-    )
-
-    glow = glow.filter(
-        ImageFilter.GaussianBlur(12)
-    )
-
+    # Neon ring
+    glow = Image.new("RGBA", overlay.size, (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    gd.ellipse(box, outline=(*CYAN[:3], 190), width=12)
+    glow = glow.filter(ImageFilter.GaussianBlur(12))
     overlay.alpha_composite(glow)
+    ImageDraw.Draw(overlay).ellipse(box, outline=CYAN, width=5)
 
-    draw = ImageDraw.Draw(overlay)
 
-    draw.ellipse(
-        box,
-        outline=CYAN,
-        width=5,
-    )
+def _draw_glow_text(overlay, xy, text, font, fill, blur=8):
+    glow = Image.new("RGBA", overlay.size, (0, 0, 0, 0))
+    ImageDraw.Draw(glow).text(xy, text, font=font, fill=(*fill[:3], 100))
+    glow = glow.filter(ImageFilter.GaussianBlur(blur))
+    overlay.alpha_composite(glow)
+    ImageDraw.Draw(overlay).text(xy, text, font=font, fill=fill)
 
 
 def generate_pnl_card(call: dict) -> str:
-    """Render a call-PNL card and return its temporary PNG path.
+    """Render and return a temporary PNG path.
 
-    Expected keys in `call`:
-        token_name
-        token_symbol
-        entry_mc
-        best_mc
+    Required call keys:
+        token_name, token_symbol, entry_mc, best_mc
 
     Optional:
-        username
-        logo_url
+        username, logo_url
     """
 
-    base = Image.open(
-        TEMPLATE_PATH
-    ).convert("RGBA")
-
+    base = Image.open(TEMPLATE_PATH).convert("RGBA")
     W, H = base.size
-
-    overlay = Image.new(
-        "RGBA",
-        base.size,
-        (0, 0, 0, 0),
-    )
-
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-
-    # -----------------------------------------------------------------------
-    # Values
-    # -----------------------------------------------------------------------
 
     entry_mc = float(call["entry_mc"])
     best_mc = float(call["best_mc"])
+    mult = best_mc / entry_mc if entry_mc else 0.0
+    accent = GREEN if mult >= 1 else RED
 
-    mult = (
-        best_mc / entry_mc
-        if entry_mc
-        else 0.0
-    )
-
-    accent = (
-        GREEN
-        if mult >= 1
-        else RED
-    )
-
-    # -----------------------------------------------------------------------
-    # Coordinates
-    # -----------------------------------------------------------------------
-
-    logo_left = int(W * LOGO_LEFT_F)
-    logo_top = int(H * LOGO_TOP_F)
-    logo_size = int(H * LOGO_SIZE_F)
-
-    name_left = int(W * NAME_LEFT_F)
-    name_top = int(H * NAME_TOP_F)
-    name_right = int(W * NAME_RIGHT_F)
-
-    stats_left = int(W * STATS_LEFT_F)
-    col2_x = int(W * COL2_X_F)
-    content_right = int(W * CONTENT_RIGHT_F)
-
-    label_top = int(H * LABEL_TOP_F)
-    value_top = int(H * VALUE_TOP_F)
-
-    divider_y = int(H * DIVIDER_Y_F)
-
-    caption_left = int(W * CAPTION_LEFT_F)
-    caption_top = int(H * CAPTION_TOP_F)
-
-    # -----------------------------------------------------------------------
-    # Large token logo — top-left
-    # -----------------------------------------------------------------------
-
-    logo_box = (
-        logo_left,
-        logo_top,
-        logo_left + logo_size,
-        logo_top + logo_size,
-    )
-
-    logo_img = _fetch_logo(
+    # ---------------------------------------------------------------
+    # Token logo + full name in the top-left header
+    # ---------------------------------------------------------------
+    _draw_logo(
+        draw,
+        overlay,
         call.get("logo_url"),
-        logo_size,
+        call.get("token_symbol", "?"),
     )
-
-    if logo_img is not None:
-        overlay.paste(
-            logo_img,
-            (logo_box[0], logo_box[1]),
-            logo_img,
-        )
-
-        _draw_glowing_logo_border(
-            overlay,
-            logo_box,
-        )
-
-    else:
-        _draw_logo_placeholder(
-            draw,
-            logo_box,
-            call["token_symbol"],
-        )
-
-    # -----------------------------------------------------------------------
-    # Large token name beside logo
-    # -----------------------------------------------------------------------
-
-    name_text = (
-        f"{call['token_name']} "
-        f"(${call['token_symbol'].upper()})"
-    )
-
-    name_max_width = (
-        name_right
-        - name_left
-    )
-
-    name_font = _fit_text(
-        draw,
-        name_text,
-        FONT_BOLD,
-        name_max_width,
-        start_size=92,
-        min_size=46,
-    )
-
-    name_display = _truncate_to_width(
-        draw,
-        name_text,
-        name_font,
-        name_max_width,
-    )
-
-    name_bbox = draw.textbbox(
-        (0, 0),
-        name_display,
-        font=name_font,
-    )
-
-    name_height = (
-        name_bbox[3]
-        - name_bbox[1]
-    )
-
-    # Vertically center the title against the logo.
-    name_y = (
-        logo_top
-        + (logo_size - name_height) / 2
-        - name_bbox[1]
-    )
-
-    # Soft blue glow behind the token name.
-    name_glow = Image.new(
-        "RGBA",
-        overlay.size,
-        (0, 0, 0, 0),
-    )
-
-    ImageDraw.Draw(name_glow).text(
-        (name_left, name_y),
-        name_display,
-        font=name_font,
-        fill=(56, 189, 248, 75),
-    )
-
-    name_glow = name_glow.filter(
-        ImageFilter.GaussianBlur(7)
-    )
-
-    overlay.alpha_composite(name_glow)
-
     draw = ImageDraw.Draw(overlay)
 
-    draw.text(
-        (name_left, name_y),
-        name_display,
-        font=name_font,
-        fill=WHITE,
-    )
-
-    # -----------------------------------------------------------------------
-    # CALLED AT / REACHED
-    # -----------------------------------------------------------------------
-
-    label_font = _font(
-        FONT_REGULAR,
-        28,
-    )
-
-    value_font = _font(
+    name = f"{call['token_name']} (${call['token_symbol'].upper()})"
+    name_font = _fit_text(
+        draw,
+        name,
         FONT_BOLD,
-        60,
+        NAME_MAX_RIGHT - NAME_LEFT,
+        start_size=70,
+        min_size=38,
     )
 
-    draw.text(
-        (stats_left, label_top),
-        "CALLED AT",
-        font=label_font,
-        fill=LABEL_GRAY,
+    bbox = draw.textbbox((0, 0), name, font=name_font)
+    name_h = bbox[3] - bbox[1]
+    name_y = LOGO_TOP + (LOGO_SIZE - name_h) / 2 - bbox[1]
+
+    _draw_glow_text(
+        overlay,
+        (NAME_LEFT, name_y),
+        name,
+        name_font,
+        WHITE,
+        blur=7,
     )
+    draw = ImageDraw.Draw(overlay)
 
-    draw.text(
-        (stats_left, value_top),
-        _fmt_compact(entry_mc),
-        font=value_font,
-        fill=WHITE,
+    # Make the ticker portion blue by drawing the complete title in two parts.
+    prefix = f"{call['token_name']} "
+    ticker = f"(${call['token_symbol'].upper()})"
+    prefix_w = draw.textlength(prefix, font=name_font)
+
+    # Cover the previous full white title only where the ticker goes, then redraw.
+    # This keeps long names fitting while giving the ticker the blue accent.
+    ticker_x = NAME_LEFT + prefix_w
+    ticker_w = draw.textlength(ticker, font=name_font)
+    draw.rectangle(
+        (ticker_x - 2, name_y - 4, ticker_x + ticker_w + 3, name_y + name_h + 4),
+        fill=(0, 0, 0, 0),
     )
+    # Transparent rectangles cannot erase the already composited glow, so redraw
+    # the complete title cleanly, then accent the ticker.
+    draw.text((NAME_LEFT, name_y), prefix, font=name_font, fill=WHITE)
+    draw.text((ticker_x, name_y), ticker, font=name_font, fill=LABEL_BLUE)
 
-    draw.text(
-        (col2_x, label_top),
-        "REACHED",
-        font=label_font,
-        fill=LABEL_GRAY,
-    )
-
-    draw.text(
-        (col2_x, value_top),
-        _fmt_compact(best_mc),
-        font=value_font,
-        fill=accent,
-    )
-
-    # -----------------------------------------------------------------------
-    # Large multiplier
-    # -----------------------------------------------------------------------
-
+    # ---------------------------------------------------------------
+    # Large multiplier inside the existing HUD box
+    # ---------------------------------------------------------------
     mult_text = _fmt_mult(mult)
-
-    mult_max_width = (
-        content_right
-        - col2_x
-        - 40
-    )
-
     mult_font = _fit_text(
         draw,
         mult_text,
         FONT_BOLD,
-        mult_max_width,
-        start_size=150,
-        min_size=70,
+        MULT_RIGHT - MULT_LEFT - 35,
+        start_size=172,   # two points larger than the previous version
+        min_size=90,
     )
 
-    mbbox = draw.textbbox(
-        (0, 0),
-        mult_text,
-        font=mult_font,
-    )
+    mb = draw.textbbox((0, 0), mult_text, font=mult_font)
+    mw = mb[2] - mb[0]
+    mh = mb[3] - mb[1]
+    mx = MULT_LEFT + (MULT_RIGHT - MULT_LEFT - mw) / 2 - mb[0]
+    my = MULT_TOP + (MULT_BOTTOM - MULT_TOP - mh) / 2 - mb[1]
 
-    mw = mbbox[2] - mbbox[0]
-    mh = mbbox[3] - mbbox[1]
-
-    mx = content_right - mw
-
-    # Keep multiplier vertically centered in the stats band.
-    my = (
-        (divider_y + label_top) / 2
-        - mh / 2
-        - mbbox[1]
-        + 42
-    )
-
-    # Neon glow.
-    glow = Image.new(
-        "RGBA",
-        overlay.size,
-        (0, 0, 0, 0),
-    )
-
-    ImageDraw.Draw(glow).text(
+    _draw_glow_text(
+        overlay,
         (mx, my),
         mult_text,
-        font=mult_font,
-        fill=(*accent[:3], 95),
+        mult_font,
+        accent,
+        blur=12,
     )
-
-    glow = glow.filter(
-        ImageFilter.GaussianBlur(10)
-    )
-
-    overlay.alpha_composite(glow)
-
     draw = ImageDraw.Draw(overlay)
 
-    draw.text(
-        (mx, my),
-        mult_text,
-        font=mult_font,
-        fill=accent,
-    )
+    # ---------------------------------------------------------------
+    # Bottom metrics
+    # ---------------------------------------------------------------
+    label_font = _font(FONT_REGULAR, 30)
+    value_font = _font(FONT_BOLD, 62)
 
-    # -----------------------------------------------------------------------
-    # Optional caller caption
-    # -----------------------------------------------------------------------
+    draw.text((CALLED_X, METRIC_LABEL_Y), "CALLED AT", font=label_font, fill=LABEL_BLUE)
+    draw.text((CALLED_X, METRIC_VALUE_Y), _fmt_compact(entry_mc), font=value_font, fill=WHITE)
 
+    draw.text((REACHED_X, METRIC_LABEL_Y), "REACHED", font=label_font, fill=LABEL_BLUE)
+    draw.text((REACHED_X, METRIC_VALUE_Y), _fmt_compact(best_mc), font=value_font, fill=accent)
+
+    # Caller is at the bottom-right and uses the same visual scale as the metrics.
     username = call.get("username")
-
     if username:
-        handle = (
-            username
-            if str(username).startswith("@")
-            else f"@{username}"
-        )
+        handle = str(username)
+        if not handle.startswith("@"):
+            handle = "@" + handle
 
-        caption_font = _font(
-            FONT_BOLD,
-            32,
-        )
+        caller_label_font = _font(FONT_REGULAR, 30)
+        caller_font = _font(FONT_BOLD, 62)
 
         draw.text(
-            (caption_left, caption_top),
-            f"Called by {handle}",
-            font=caption_font,
-            fill=CYAN,
+            (CALLER_X, METRIC_LABEL_Y),
+            "CALLED BY",
+            font=caller_label_font,
+            fill=LABEL_BLUE,
         )
 
-    # -----------------------------------------------------------------------
-    # Composite and save
-    # -----------------------------------------------------------------------
+        # Keep the handle inside the right border.
+        max_handle_width = W - CALLER_X - 70
+        caller_font = _fit_text(
+            draw,
+            handle,
+            FONT_BOLD,
+            max_handle_width,
+            start_size=62,
+            min_size=40,
+        )
 
-    final_img = Image.alpha_composite(
-        base,
-        overlay,
-    ).convert("RGB")
+        handle_bbox = draw.textbbox((0, 0), handle, font=caller_font)
+        handle_w = handle_bbox[2] - handle_bbox[0]
+        handle_x = W - 70 - handle_w - handle_bbox[0]
+
+        # Align the caller value to the right, like the new UI.
+        draw.text(
+            (handle_x, METRIC_VALUE_Y),
+            handle,
+            font=caller_font,
+            fill=WHITE,
+        )
+
+    final_img = Image.alpha_composite(base, overlay).convert("RGB")
 
     fd, path = tempfile.mkstemp(
         prefix="pnl_card_",
         suffix=".png",
         dir=tempfile.gettempdir(),
     )
-
     os.close(fd)
 
-    final_img.save(
-        path,
-        "PNG",
-    )
-
+    final_img.save(path, "PNG")
     return path
