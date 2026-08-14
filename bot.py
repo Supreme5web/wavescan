@@ -110,7 +110,7 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     paid_line = "✅ Paid" if dex_paid else "❌ Not Paid"
 
     lines = [
-        f"💸 *(${escape_md(symbol)})* {escape_md(name)} | ⌛{escape_md(age)} | {escape_md(dex)}",
+        f"💸 *\\(${escape_md(symbol)}\\)* {escape_md(name)} \\| ⌛{escape_md(age)} \\| {escape_md(dex)}",
         "",
         f"┏💰 MC: `{format_usd_short(mc)}` \\(ATH `{format_usd_short(ath_mc)}`\\)",
         f"├ 💵 Price: `{format_price(price)}`",
@@ -144,7 +144,7 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
                 perf = f"{mult:.1f}x"
             else:
                 perf = f"{(mult - 1) * 100:+.0f}%"
-            lines += ["", f"1st scanned by {escape_md(scanner)} @ {escape_md(_fmt_plain_compact(entry_mc))} [{escape_md(perf)}]"]
+            lines += ["", f"1st scanned by {escape_md(scanner)} @ {escape_md(_fmt_plain_compact(entry_mc))} \\[{escape_md(perf)}\\]"]
 
     return "\n".join(lines)
 
