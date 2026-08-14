@@ -4,7 +4,6 @@ import time
 import leaderboard
 import pnl_card
 import pnl_lookup
-import solana
 import storage
 from config import BOT_NAME
 from market import fetch_best_pair, get_ath_mc, get_market_cap
@@ -14,7 +13,7 @@ from telegram import (
 )
 from utils import (
     escape_md, escape_url, format_usd_short, format_price, format_pct,
-    format_age, risk_label, truncate_ca, parse_mc, find_ca, CA_RE,
+    format_age, truncate_ca, parse_mc, find_ca, CA_RE,
 )
 
 ALERT_KEY = "alert:{chat_id}:{ca}:{user_id}"
@@ -59,22 +58,26 @@ def _action_keyboard(ca: str):
 
 
 def _social_links_line(pair: dict) -> str:
-    info = pair.get("info") or {}
-    label_map = {"twitter": "Twitter", "telegram": "Telegram", "discord": "Discord"}
-    socials = sorted(info.get("socials") or [], key=lambda s: 0 if s.get("type") == "telegram" else 1)
+    socials = (pair.get("info") or {}).get("socials") or []
+    for social in socials:
+        if social.get("type") in ("twitter", "x") and social.get("url"):
+            return f"🔗 [𝕏]({escape_url(social['url'])})"
+    return ""
 
-    parts = []
-    for s in socials:
-        url = s.get("url")
-        if url:
-            stype = s.get("type")
-            label = label_map.get(stype, (stype or "Link").title())
-            emoji = _SOCIAL_EMOJI.get(stype, "🔗")
-            parts.append(f"{emoji} [{label}]({escape_url(url)})")
-    websites = info.get("websites") or []
-    if websites and websites[0].get("url"):
-        parts.append(f"🌐 [Website]({escape_url(websites[0]['url'])})")
-    return " • ".join(parts)
+
+def _fmt_change(value) -> str:
+    v = float(value or 0)
+    return f"{v:+.1f}" if v else "0.0"
+
+
+def _fmt_th(pair: dict) -> str:
+    events = pair.get("events") or {}
+    keys = ("5m", "15m", "30m", "1h", "2h")
+    values = []
+    for key in keys:
+        values.append(_fmt_change((events.get(key) or {}).get("priceChangePercentage")))
+    change24 = float((events.get("24h") or {}).get("priceChangePercentage") or 0)
+    return "| ".join(values), change24
 
 
 def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
@@ -83,66 +86,72 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     name = base.get("name") or symbol
     price = float(pair.get("priceUsd") or 0)
     mc = get_market_cap(pair)
-    liq = (pair.get("liquidity") or {}).get("usd") or 0
-    vol24 = (pair.get("volume") or {}).get("h24") or 0
-    vol1h = (pair.get("volume") or {}).get("h1") or 0
-    created_ms = pair.get("pairCreatedAt")
-    txns1h = (pair.get("txns") or {}).get("h1") or {}
-    buys1h, sells1h = txns1h.get("buys", 0), txns1h.get("sells", 0)
-    info = pair.get("info") or {}
     ath_mc = get_ath_mc(pair, mc)
-    dex_paid = bool(info.get("socials") or info.get("websites") or info.get("description") or info.get("header"))
+    liq = float((pair.get("liquidity") or {}).get("usd") or 0)
+    vol24 = float((pair.get("volume") or {}).get("h24") or 0)
+    vol1h = float((pair.get("volume") or {}).get("h1") or 0)
+    txns1h = (pair.get("txns") or {}).get("h1") or {}
+    buys1h = int(txns1h.get("buys") or 0)
+    sells1h = int(txns1h.get("sells") or 0)
+    created_ms = pair.get("pairCreatedAt") or 0
+    dex = str(pair.get("dexId") or "Unknown").replace("-", " ").title()
+    holders = int(pair.get("holders") or 0)
+    dev_pct = float(pair.get("devPercentage") or 0)
+    dev_wallet = pair.get("devWallet") or ""
+    dex_paid = bool(pair.get("dexPaid"))
+    th, change24 = _fmt_th(pair)
 
-    # Keep the requested UI; escape only characters required by Telegram MarkdownV2.
-    safe_name = escape_md(name)
-    safe_symbol = escape_md(symbol)
-    safe_ca = escape_md(ca)
-    chain_name = escape_md((pair.get("dexId") or pair.get("chainId") or "unknown").title())
-    age = escape_md(format_age(created_ms))
-    holding = pair.get("devHolding")
-    wallet = pair.get("devWallet") or "N/A"
-    if holding is None:
-        dev_status = "Unknown"
-        holding_text = ""
-    else:
-        dev_status = "Holding 🚫" if float(holding) > 0 else "Not Holding ✅"
-        holding_text = f" ({float(holding):.1f}%)"
+    age = format_age(created_ms)
+    if age == "0m":
+        age = "<1m"
 
-    # TH is intentionally compact to match the requested card.
-    th = pair.get("th") or [0, 0, 0, 0, 0]
-    th = list(th)[:5] + [0] * max(0, 5 - len(th))
-    th_text = " | ".join(f"{float(x):.1f}" for x in th[:5])
-    change = pair.get("priceChange") or {}
-    change_pct = float(change.get("h1") or change.get("h24") or 0)
+    dev_status = f"Holding 🚫 ({dev_pct:.1f}%)" if dev_pct > 0 else "Not Holding ✅ (0.0%)"
+    wallet_short = f"{dev_wallet[:4]}...{dev_wallet[-4:]}" if len(dev_wallet) > 10 else (dev_wallet or "N/A")
+    paid_line = "✅ Paid" if dex_paid else "❌ Not Paid"
 
     lines = [
-        f"💸 \\(${safe_symbol}\\) {safe_name} | ⌛ {age} | {chain_name}",
+        f"💸 *(${escape_md(symbol)})* {escape_md(name)} | ⌛{escape_md(age)} | {escape_md(dex)}",
         "",
-        f"┏ 💰 MC: {escape_md(format_usd_short(mc))} \\(ATH {escape_md(format_usd_short(ath_mc))}\\)",
-        f"├ 💵 Price: {escape_md(format_price(price))}",
-        f"├ 💧 Liquidity: {escape_md(format_usd_short(liq) if liq else 'N/A')}",
-        f"├ 📊 Vol: {escape_md(format_usd_short(vol24))}",
-        f"├ 1H: {escape_md(format_usd_short(vol1h))}",
-        f"┗ TH        {escape_md(th_text)} [{change_pct:.0f}%]",
+        f"┏💰 MC: `{format_usd_short(mc)}` (ATH `{format_usd_short(ath_mc)}`)",
+        f"├ 💵 Price: `{format_price(price)}`",
+        f"├ 💧 Liquidity: `{format_usd_short(liq) if liq else 'N/A'}`",
+        f"├📊 Vol: `{format_usd_short(vol24)}`",
+        f"├1H: `{format_usd_short(vol1h)}`",
+        f"┗ TH        `{th}` `[{change24:.0f}%]`",
         "",
-        "👨‍💻 Dev",
-        f"┏ Status     {escape_md(dev_status)}{escape_md(holding_text)}",
-        f"┣ Wallet      {escape_md(wallet)}",
-        f"┗ DEX Paid    {'✅ Paid' if dex_paid else '❌ Not Paid'}",
-        "",
-        "🔗 𝕏",
-        "",
-        safe_ca,
-        "",
-        "AXI • TRO • BONK • MAE • GMGN",
+        "👨‍💻 *Dev*",
+        "┏ Status     " + escape_md(dev_status),
+        "┣ Wallet      `" + escape_md(wallet_short) + "`",
+        "┗ DEX Paid    " + escape_md(paid_line),
     ]
+
+    socials_line = _social_links_line(pair)
+    if socials_line:
+        lines += ["", socials_line]
+
+    lines += ["", f"`{escape_md(ca)}`"]
+
+    # Compact terminal labels.
+    lines += ["", "AXI • TRO • BONK • MAE • GMGN"]
+
+    if chat_id is not None and pnl_lookup.available():
+        first_call = pnl_lookup.get_first_call(chat_id, ca)
+        if first_call:
+            scanner = first_call.get("username") or first_call.get("first_name") or "someone"
+            entry_mc = float(first_call.get("entry_mc") or 0)
+            mult = mc / entry_mc if entry_mc else 0
+            if mult >= 2:
+                perf = f"{mult:.1f}x"
+            else:
+                perf = f"{(mult - 1) * 100:+.0f}%"
+            lines += ["", f"1st scanned by {escape_md(scanner)} @ {escape_md(_fmt_plain_compact(entry_mc))} [{escape_md(perf)}]"]
 
     return "\n".join(lines)
 
 
 def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
     if not ca or not CA_RE.fullmatch(ca):
-        send_message(chat_id, "Usage: `/data <contract address>`", message_id)
+        send_message(chat_id, "Send a valid Solana contract address directly.", message_id)
         return
     pair = fetch_best_pair(ca)
     if not pair:
@@ -374,9 +383,6 @@ def handle_update(update: dict):
         send_message(chat_id, START_MESSAGE, message_id)
     elif text == "/ping":
         send_message(chat_id, "🏓 Pong\\! WaveScan is alive\\.", message_id)
-    elif text.startswith("/data"):
-        ca = text[len("/data"):].strip() or find_ca((message.get("reply_to_message") or {}).get("text", ""))
-        handle_data(chat_id, ca, message_id, user, chat_type)
     elif text.startswith("/alert") and not text.startswith("/alerts"):
         handle_alert(chat_id, text, message_id, user)
     elif text == "/alerts":
