@@ -7,7 +7,7 @@ import pnl_lookup
 import solana
 import storage
 from config import BOT_NAME
-from market import fetch_best_pair, fetch_peak_price
+from market import fetch_best_pair, get_ath_mc, get_market_cap
 from telegram import (
     send_message, send_photo, send_photo_file, delete_message, answer_callback_query,
     edit_message_text, edit_message_caption,
@@ -82,7 +82,7 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     symbol = (base.get("symbol") or "UNKNOWN").upper()
     name = base.get("name") or symbol
     price = float(pair.get("priceUsd") or 0)
-    mc = pair.get("fdv") or pair.get("marketCap") or 0
+    mc = get_market_cap(pair)
     liq = (pair.get("liquidity") or {}).get("usd") or 0
     vol24 = (pair.get("volume") or {}).get("h24") or 0
     vol1h = (pair.get("volume") or {}).get("h1") or 0
@@ -94,13 +94,11 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     buys1h, sells1h = txns1h.get("buys", 0), txns1h.get("sells", 0)
     info = pair.get("info") or {}
 
-    # ATH market cap from DexPaprika's OHLCV history since the pool was
-    # created — a live snapshot alone would miss a spike that's already receded.
-    ath_mc = mc
-    if price > 0 and mc > 0 and pool and created_ms:
-        peak_price = fetch_peak_price(chain_id, pool, created_ms)
-        if peak_price > 0:
-            ath_mc = max(ath_mc, peak_price * (mc / price))
+    # All-time-high market cap — Solana Tracker's /ath endpoint for Solana
+    # tokens (tracked from every indexed trade), DexPaprika OHLCV lookback
+    # as a fallback. A live snapshot alone would miss a spike that's
+    # already receded by the time this card is built.
+    ath_mc = get_ath_mc(pair, mc)
 
     # Holder concentration is only computable for Solana here, via free
     # public RPC (no paid indexer) — omitted entirely for other chains or on
@@ -167,9 +165,10 @@ def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
         return
 
     if user and user.get("id") and leaderboard.available():
-        mc = pair.get("fdv") or pair.get("marketCap") or 0
+        mc = get_market_cap(pair)
         symbol = ((pair.get("baseToken") or {}).get("symbol") or "UNKNOWN").upper()
-        leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId"), mc)
+        if not leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId"), mc):
+            print(f"leaderboard record_call did not persist for chat={chat_id} ca={ca} mc={mc}")
 
     caption = _build_token_message(pair, ca, chat_id)
     keyboard = _action_keyboard(ca)

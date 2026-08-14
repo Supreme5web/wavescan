@@ -51,3 +51,11 @@ SOLANA_RPC_URL = os.environ.get("SOLANA_RPC_URL") or (
     else "https://api.mainnet-beta.solana.com"
 )
 TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+
+# Solana Tracker Data API — used for accurate Solana token info + a real
+# all-time-high (Solana Tracker tracks every indexed trade, so its /ath
+# endpoint doesn't miss spikes the way a coarse OHLCV lookback can) and as
+# a fallback market-cap source when Dexscreener hasn't populated fdv/marketCap
+# yet (common for pairs that are only seconds/minutes old).
+SOLANATRACKER_API = "https://data.solanatracker.io"
+SOLANATRACKER_API_KEY = os.environ.get("SOLANATRACKER_API_KEY")

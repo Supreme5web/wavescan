@@ -6,7 +6,7 @@ from collections import defaultdict
 import leaderboard
 import storage
 from config import TRADING_BOTS
-from market import fetch_best_pair, fetch_peak_price
+from market import fetch_best_pair, fetch_peak_price, get_market_cap
 from telegram import send_message
 from utils import escape_md, format_usd_short
 
@@ -55,7 +55,7 @@ def _sweep_alerts():
             continue  # leave pending, retry next sweep
 
         price = float(pair.get("priceUsd") or 0)
-        mc = pair.get("fdv") or pair.get("marketCap") or 0
+        mc = get_market_cap(pair)
         symbol = ((pair.get("baseToken") or {}).get("symbol") or "UNKNOWN").upper()
 
         peak_mc = mc
@@ -97,7 +97,7 @@ def _sweep_leaderboard():
         pair = pair_cache[ca]
         if not pair:
             continue
-        mc = pair.get("fdv") or pair.get("marketCap") or 0
+        mc = get_market_cap(pair)
         if mc:
             leaderboard.update_best(chat_id, ca, mc)
 

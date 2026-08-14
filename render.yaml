@@ -20,3 +20,5 @@ services:
         sync: false
       - key: HELIUS_API_KEY
         sync: false
+      - key: SOLANATRACKER_API_KEY
+        sync: false

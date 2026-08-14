@@ -2,7 +2,49 @@ from datetime import datetime, timezone
 
 import requests
 
+import solanatracker
 from config import DEXSCREENER_API, DEXPAPRIKA_API, DEXPAPRIKA_NETWORKS
+
+
+def get_market_cap(pair: dict) -> float:
+    """FDV/marketCap from a Dexscreener pair, falling back to Solana
+    Tracker for Solana tokens when Dexscreener hasn't populated either
+    field yet. Without this fallback, callers that skip logging on a
+    falsy market cap (leaderboard/PNL call-logging in particular) would
+    silently drop a scan of a pair that's only seconds/minutes old."""
+    mc = pair.get("fdv") or pair.get("marketCap") or 0
+    if mc:
+        return mc
+    if pair.get("chainId") == "solana":
+        mint = (pair.get("baseToken") or {}).get("address")
+        if mint:
+            return solanatracker.fetch_market_cap(mint)
+    return mc
+
+
+def get_ath_mc(pair: dict, current_mc: float) -> float:
+    """All-time-high market cap for display. Solana tokens use Solana
+    Tracker's dedicated /ath endpoint (computed from every indexed trade,
+    so it can't miss a spike). Other chains, or Solana tokens if Solana
+    Tracker isn't configured, fall back to the DexPaprika OHLCV lookback
+    since the pool was created."""
+    chain_id = pair.get("chainId")
+    if chain_id == "solana" and solanatracker.available():
+        mint = (pair.get("baseToken") or {}).get("address")
+        if mint:
+            _, ath_mc = solanatracker.fetch_ath(mint)
+            if ath_mc:
+                return max(current_mc, ath_mc)
+
+    price = float(pair.get("priceUsd") or 0)
+    pool = pair.get("pairAddress")
+    created_ms = pair.get("pairCreatedAt")
+    ath_mc = current_mc
+    if price > 0 and current_mc > 0 and pool and created_ms:
+        peak_price = fetch_peak_price(chain_id, pool, created_ms)
+        if peak_price > 0:
+            ath_mc = max(ath_mc, peak_price * (current_mc / price))
+    return ath_mc
 
 
 def fetch_best_pair(ca: str):
