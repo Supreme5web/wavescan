@@ -4,7 +4,7 @@ A lean Telegram bot for token lookups and market-cap alerts. Market/token data c
 
 ## Commands
 
-- `/data <ca>` — price, market cap, liquidity, volume for a token. The card has two buttons: 🔄 **Refresh** (re-fetches and edits the card in place) and 🗑️ **Delete** (only usable by whoever ran the lookup).
+- Send a bare Solana contract address — fetch price, market cap, liquidity, volume and token info. The card has two buttons: 🔄 **Refresh** and 🗑️ **Delete**.
 - `/alert <ca> <target mc>` — get pinged when a token hits a target market cap (`500k`, `1.2m`, `900000` all work)
 - `/alerts` — list your active alerts in this chat
 - `/cancel <ca>` — cancel an alert
@@ -25,7 +25,7 @@ via an HTTP endpoint you trigger externally, instead of a paid Render cron.
    - Start command: `gunicorn app:app`
 3. Set environment variables:
    - `TELEGRAM_BOT_TOKEN` — from [@BotFather](https://t.me/BotFather)
-   - `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` — from an [Upstash](https://upstash.com) Redis database (free tier is fine; this is where alerts are stored). Without these, `/data` and `/ping` still work, but `/alert` will tell users alerts aren't configured.
+   - `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` — from an [Upstash](https://upstash.com) Redis database (free tier is fine; this is where alerts are stored). Without these, bare CA lookups and `/ping` still work, but `/alert` will tell users alerts aren't configured.
    - `CRON_SECRET` — any random string you make up, so strangers can't trigger your sweep endpoint.
    - `HELIUS_API_KEY` — from [Helius](https://helius.dev). Used for Solana holder-count / top-10 concentration lookups instead of the public RPC (higher rate limits, more reliable). Optional — without it, the bot falls back to the public Solana RPC.
    - `SOLANATRACKER_API_KEY` — from [Solana Tracker](https://www.solanatracker.io/account). Used for two things on Solana tokens: (1) the `ATH:` figure on `/data`, sourced from Solana Tracker's own tracked all-time-high instead of a DexPaprika candle lookback, and (2) a market-cap fallback when Dexscreener hasn't populated `fdv`/`marketCap` yet (common on pairs that are only seconds/minutes old) — without this fallback a fresh scan of a brand-new pair can have `mc = 0` and silently fail to log a leaderboard/PNL call. Optional — without it, ATH falls back to the DexPaprika lookback and the mc fallback is skipped.

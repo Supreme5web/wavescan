@@ -51,8 +51,24 @@ def fetch_market_cap(mint: str) -> float:
     pools = (info or {}).get("pools") or []
     if not pools:
         return 0
-    mc = (pools[0].get("marketCap") or {}).get("usd")
-    return float(mc or 0)
+    pool = pools[0] or {}
+    candidates = [
+        pool.get("marketCap"),
+        pool.get("marketCapUsd"),
+        pool.get("fdv"),
+        (info or {}).get("marketCap"),
+        (info or {}).get("marketCapUsd"),
+    ]
+    for mc in candidates:
+        if isinstance(mc, dict):
+            mc = mc.get("usd") or mc.get("value") or mc.get("marketCapUsd")
+        try:
+            value = float(mc or 0)
+            if value > 0:
+                return value
+        except (TypeError, ValueError):
+            continue
+    return 0.0
 
 
 def fetch_ath(mint: str):

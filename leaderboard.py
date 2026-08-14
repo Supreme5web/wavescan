@@ -48,33 +48,57 @@ def _headers(prefer: str = None) -> dict:
 
 
 def record_call(chat_id, user: dict, ca: str, symbol: str, chain_id: str, mc: float) -> bool:
-    """Log a user's first call on this CA in this chat. Later calls on the
-    same (chat, user, ca) are no-ops thanks to the unique constraint +
-    ignore-duplicates — entry_mc is fixed at first sight; update_best()
-    handles every rise after that."""
-    if not available() or not mc:
+    """Persist the first call for (chat, user, CA).
+
+    Direct CA messages are calls; this function is the single persistence
+    point. It deliberately logs the Supabase response so deployment/config
+    problems cannot silently leave the calls table empty.
+    """
+    if not available():
+        print("[CALL] Supabase unavailable: SUPABASE_URL or SUPABASE_SERVICE_KEY is missing")
         return False
+    try:
+        mc = float(mc or 0)
+    except (TypeError, ValueError):
+        mc = 0.0
+    if mc <= 0:
+        print(f"[CALL] Not recording {ca}: Solana Tracker returned market cap={mc}")
+        return False
+
+    user_id = user.get("id")
+    if not user_id:
+        print(f"[CALL] Not recording {ca}: Telegram user id missing")
+        return False
+
     row = {
         "chat_id": chat_id,
-        "user_id": user.get("id"),
+        "user_id": user_id,
         "username": user.get("username"),
         "first_name": user.get("first_name"),
         "ca": ca,
         "symbol": symbol,
-        "chain_id": chain_id,
+        "chain_id": chain_id or "solana",
         "entry_mc": mc,
         "best_mc": mc,
     }
     try:
         r = requests.post(
-            f"{SUPABASE_URL}/rest/v1/calls?on_conflict=chat_id,user_id,ca",
+            f"{SUPABASE_URL}/rest/v1/calls",
             headers=_headers("resolution=ignore-duplicates,return=minimal"),
+            params={"on_conflict": "chat_id,user_id,ca"},
             json=row,
             timeout=_TIMEOUT,
         )
-        return r.ok
+        if r.ok:
+            print(f"[CALL] Supabase saved: chat={chat_id} user={user_id} ca={ca} mc={mc}")
+            return True
+        print(
+            f"[CALL] Supabase rejected insert: status={r.status_code} "
+            f"body={r.text[:500]!r}"
+        )
+        return False
     except Exception as err:
-        print("leaderboard record_call failed:", err)
+        print(f"[CALL] Supabase insert exception: {err}")
         return False
 
 

@@ -21,10 +21,9 @@ ALERT_KEY = "alert:{chat_id}:{ca}:{user_id}"
 GROUP_CHAT_TYPES = ("group", "supergroup")
 
 START_MESSAGE = f"""
-*{BOT_NAME}* — fast Solana \\& multi\\-chain token lookups and market\\-cap alerts, right in Telegram\\.
+*{BOT_NAME}* — fast Solana token lookups and market\\-cap alerts, right in Telegram\\.
 
 Commands:
-/data `<ca>` \\- price, market cap, liquidity, volume
 /alert `<ca> <target mc>` \\- ping me when a token hits a target mc \\(e\\.g\\. `500k`, `1\\.2m`\\)
 /alerts \\- list your active alerts
 /cancel `<ca>` \\- cancel an alert
@@ -148,20 +147,26 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     return "\n".join(lines)
 
 
-def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
+def handle_token(chat_id, ca, message_id, user=None, chat_type=None):
     if not ca or not CA_RE.fullmatch(ca):
-        send_message(chat_id, "Usage: `/data <contract address>`", message_id)
+        send_message(chat_id, "Usage: send the contract address directly.", message_id)
         return
     pair = fetch_best_pair(ca)
     if not pair:
         send_message(chat_id, f"❌ No pair found for `{escape_md(truncate_ca(ca))}`", message_id)
         return
 
-    if user and user.get("id") and leaderboard.available():
+    # Every direct CA message is a call. Record it before sending the card.
+    # This is independent of the old /data command.
+    if user and user.get("id"):
         mc = get_market_cap(pair)
         symbol = ((pair.get("baseToken") or {}).get("symbol") or "UNKNOWN").upper()
-        if not leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId"), mc):
-            print(f"leaderboard record_call did not persist for chat={chat_id} ca={ca} mc={mc}")
+        print(
+            f"[CALL] chat={chat_id} user={user.get('id')} ca={ca} "
+            f"symbol={symbol} mc={mc}"
+        )
+        if not leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId") or "solana", mc):
+            print(f"[CALL] Supabase insert failed: chat={chat_id} ca={ca} mc={mc}")
 
     caption = _build_token_message(pair, ca, chat_id)
     keyboard = _action_keyboard(ca)
@@ -310,7 +315,7 @@ def handle_pnl(chat_id, text, message_id):
 
 
 def handle_callback(callback_query: dict):
-    """Handles the Refresh and Delete buttons under a /data card."""
+    """Handles the Refresh and Delete buttons under a token card."""
     cq_id = callback_query["id"]
     data = callback_query.get("data") or ""
     message = callback_query.get("message") or {}
@@ -382,9 +387,6 @@ def handle_update(update: dict):
         send_message(chat_id, START_MESSAGE, message_id)
     elif text == "/ping":
         send_message(chat_id, "🏓 Pong\\! WaveScan is alive\\.", message_id)
-    elif text.startswith("/data"):
-        ca = text[len("/data"):].strip() or find_ca((message.get("reply_to_message") or {}).get("text", ""))
-        handle_data(chat_id, ca, message_id, user, chat_type)
     elif text.startswith("/alert") and not text.startswith("/alerts"):
         handle_alert(chat_id, text, message_id, user)
     elif text == "/alerts":
@@ -396,4 +398,5 @@ def handle_update(update: dict):
     elif text.startswith("/pnl"):
         handle_pnl(chat_id, text, message_id)
     elif CA_RE.fullmatch(text):
-        handle_data(chat_id, text, message_id, user, chat_type)
+        # A bare CA is the token lookup/call action. There is no /data command.
+        handle_token(chat_id, text, message_id, user, chat_type)

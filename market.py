@@ -52,8 +52,15 @@ def fetch_best_pair(ca: str):
         pool.get("priceUsd"),
     )
     mc_usd = _first_number(
-        market_cap.get("usd") if isinstance(market_cap, dict) else None,
+        market_cap.get("usd") if isinstance(market_cap, dict) else market_cap,
+        market_cap.get("value") if isinstance(market_cap, dict) else None,
+        market_cap.get("marketCapUsd") if isinstance(market_cap, dict) else None,
         pool.get("marketCapUsd"),
+        pool.get("marketCap"),
+        token.get("marketCapUsd"),
+        token.get("marketCap"),
+        info.get("marketCapUsd"),
+        info.get("marketCap"),
     )
     liquidity_usd = _first_number(
         liquidity.get("usd") if isinstance(liquidity, dict) else None,
