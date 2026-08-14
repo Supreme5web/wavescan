@@ -41,12 +41,14 @@ via an HTTP endpoint you trigger externally, instead of a paid Render cron.
          chain_id text,
          entry_mc numeric not null,
          best_mc numeric not null,
+         message_id bigint,
          multiple numeric generated always as (best_mc / entry_mc) stored,
          called_at timestamptz not null default now(),
          unique (chat_id, user_id, ca)
      );
      create index calls_chat_id_idx on calls (chat_id);
      ```
+     Upgrading an existing table? Just run `alter table calls add column message_id bigint;`
 4. Once the service is live, point Telegram at it:
    ```
    https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://<your-service>.onrender.com/webhook

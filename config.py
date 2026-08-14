@@ -2,6 +2,9 @@ import os
 
 BOT_NAME = "WaveScan"
 
+# Used to build the "jump to this bot" deep link in the /data footer.
+BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "WaveScanBot")
+
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 

@@ -1,5 +1,6 @@
 import re
 import time
+from datetime import datetime
 
 _MD_SPECIAL = re.compile(r'([_*\[\]()~`>#+\-=|{}.!\\])')
 _MC_RE = re.compile(r'^\$?([\d,]*\.?\d+)\s*([kKmMbB])?$')
@@ -80,3 +81,13 @@ def find_ca(text: str):
         return None
     m = CA_RE.search(text)
     return m.group(0) if m else None
+
+
+def parse_iso_ms(ts) -> int:
+    """Parse a Postgres/Supabase timestamptz string into epoch milliseconds."""
+    if not ts:
+        return 0
+    try:
+        return int(datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp() * 1000)
+    except Exception:
+        return 0

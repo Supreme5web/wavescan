@@ -19,6 +19,7 @@ Expected Supabase table (run once in the SQL editor):
         chain_id text,
         entry_mc numeric not null,
         best_mc numeric not null,
+        message_id bigint,
         multiple numeric generated always as (best_mc / entry_mc) stored,
         called_at timestamptz not null default now(),
         unique (chat_id, user_id, ca)
@@ -47,7 +48,7 @@ def _headers(prefer: str = None) -> dict:
     return headers
 
 
-def record_call(chat_id, user: dict, ca: str, symbol: str, chain_id: str, mc: float) -> bool:
+def record_call(chat_id, user: dict, ca: str, symbol: str, chain_id: str, mc: float, message_id=None) -> bool:
     """Persist the first call for (chat, user, CA).
 
     Direct CA messages are calls; this function is the single persistence
@@ -80,6 +81,7 @@ def record_call(chat_id, user: dict, ca: str, symbol: str, chain_id: str, mc: fl
         "chain_id": chain_id or "solana",
         "entry_mc": mc,
         "best_mc": mc,
+        "message_id": message_id,
     }
     try:
         r = requests.post(

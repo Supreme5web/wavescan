@@ -6,7 +6,7 @@ import pnl_card
 import pnl_lookup
 import solana
 import storage
-from config import BOT_NAME, TRADING_BOTS
+from config import BOT_NAME, BOT_USERNAME, TRADING_BOTS
 from market import fetch_best_pair, get_ath_mc, get_market_cap
 from telegram import (
     send_message, send_photo, send_photo_file, delete_message, answer_callback_query,
@@ -14,7 +14,7 @@ from telegram import (
 )
 from utils import (
     escape_md, escape_url, format_usd_short, format_price, format_pct,
-    format_age, truncate_ca, parse_mc, find_ca, CA_RE,
+    format_age, truncate_ca, parse_mc, find_ca, parse_iso_ms, CA_RE,
 )
 
 ALERT_KEY = "alert:{chat_id}:{ca}:{user_id}"
@@ -35,19 +35,15 @@ Commands:
 _SOCIAL_EMOJI = {"twitter": "🐦", "telegram": "✈️", "discord": "🎮"}
 
 
-def _fmt_plain_compact(value) -> str:
-    """5k / 400k / 1.2m style, no $ sign - used for the 'scanned by' line."""
-    v = float(value or 0)
-    if v >= 1_000_000_000:
-        num, suffix = v / 1_000_000_000, "b"
-    elif v >= 1_000_000:
-        num, suffix = v / 1_000_000, "m"
-    elif v >= 1_000:
-        num, suffix = v / 1_000, "k"
-    else:
-        return f"{v:,.0f}"
-    text = f"{num:.1f}".rstrip("0").rstrip(".")
-    return f"{text}{suffix}"
+def _jump_link(chat_id, message_id):
+    """Deep link straight to a message in a supergroup, or None if this
+    chat isn't a supergroup (no -100 prefix) or there's no message_id."""
+    if not message_id:
+        return None
+    chat_str = str(chat_id)
+    if chat_str.startswith("-100"):
+        return f"https://t.me/c/{chat_str[4:]}/{message_id}"
+    return None
 
 
 def _action_keyboard(ca: str):
@@ -146,11 +142,22 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
             scanner = first_call.get("username") or first_call.get("first_name") or "someone"
             entry_mc = float(first_call.get("entry_mc") or 0)
             mult = mc / entry_mc if entry_mc else 0
-            if mult >= 2:
-                perf = f"{mult:.1f}x"
+            perf = f"{mult:.1f}x" if mult >= 2 else f"{(mult - 1) * 100:.0f}%"
+
+            deep_link = f"https://t.me/{BOT_USERNAME}?start=call_{chat_id}_{first_call.get('user_id', '')}"
+            age = format_age(parse_iso_ms(first_call.get("called_at")))
+            jump_link = _jump_link(chat_id, first_call.get("message_id"))
+
+            footer = (
+                f"💢[{escape_md(scanner)}]({escape_url(deep_link)}) @ "
+                f"{escape_md(format_usd_short(entry_mc))} \\[{escape_md(perf)}\\]"
+            )
+            if jump_link:
+                footer += f" \\([{escape_md(age)}]({escape_url(jump_link)}) ago\\)"
             else:
-                perf = f"{(mult - 1) * 100:+.0f}%"
-            lines += ["", f"1st scanned by {escape_md(scanner)} @ {escape_md(_fmt_plain_compact(entry_mc))} \\[{escape_md(perf)}\\]"]
+                footer += f" \\({escape_md(age)} ago\\)"
+
+            lines += ["", footer]
 
     return "\n".join(lines)
 
@@ -168,7 +175,7 @@ def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
         mc = get_market_cap(pair)
         if user and user.get("id"):
             symbol = ((pair.get("baseToken") or {}).get("symbol") or "UNKNOWN").upper()
-            if not leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId"), mc):
+            if not leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId"), mc, message_id):
                 print(f"leaderboard record_call did not persist for chat={chat_id} ca={ca} mc={mc}")
         # Ratchet best_mc using this live lookup too, not just the periodic
         # sweep, so /pnl and /leaderboard reflect the current price sooner.
