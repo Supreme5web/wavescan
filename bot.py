@@ -6,7 +6,7 @@ import pnl_card
 import pnl_lookup
 import solana
 import storage
-from config import BOT_NAME
+from config import BOT_NAME, TRADING_BOTS
 from market import fetch_best_pair, get_ath_mc, get_market_cap
 from telegram import (
     send_message, send_photo, send_photo_file, delete_message, answer_callback_query,
@@ -24,7 +24,6 @@ START_MESSAGE = f"""
 *{BOT_NAME}* — fast Solana \\& multi\\-chain token lookups and market\\-cap alerts, right in Telegram\\.
 
 Commands:
-/data `<ca>` \\- price, market cap, liquidity, volume
 /alert `<ca> <target mc>` \\- ping me when a token hits a target mc \\(e\\.g\\. `500k`, `1\\.2m`\\)
 /alerts \\- list your active alerts
 /cancel `<ca>` \\- cancel an alert
@@ -76,7 +75,7 @@ def _fmt_top_holders(ca: str, chain_id: str):
     if not percentages:
         return None, None
     top5 = percentages[:5]
-    values = "| ".join(f"{p:.1f}" for p in top5)
+    values = " \\| ".join(f"{p:.1f}" for p in top5)
     top10_total = sum(percentages)
     return values, top10_total
 
@@ -106,22 +105,22 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     if age == "0m":
         age = "<1m"
 
-    dev_status = f"Holding 🚫 ({dev_pct:.1f}%)" if dev_pct > 0 else "Not Holding ✅ (0.0%)"
+    dev_status = "Hold 🚫" if dev_pct > 0 else "Sold✅"
     wallet_short = f"{dev_wallet[:4]}...{dev_wallet[-4:]}" if len(dev_wallet) > 10 else (dev_wallet or "N/A")
     paid_line = "✅ Paid" if dex_paid else "❌ Not Paid"
 
     lines = [
         f"💸 *\\(${escape_md(symbol)}\\)* {escape_md(name)} \\| ⌛{escape_md(age)} \\| {escape_md(dex)}",
         "",
-        f"┏💰 MC: `{format_usd_short(mc)}` \\(ATH `{format_usd_short(ath_mc)}`\\)",
-        f"├ 💵 Price: `{format_price(price)}`",
-        f"├ 💧 Liquidity: `{format_usd_short(liq) if liq else 'N/A'}`",
-        f"├📊 Vol: `{format_usd_short(vol24)}`",
-        f"├1H: `{format_usd_short(vol1h)}`",
+        f"┏ MC:      `{format_usd_short(mc)}` \\(ATH `{format_usd_short(ath_mc)}`\\)",
+        f"┣ Price:   `{format_price(price)}`",
+        f"┣ LP:      `{format_usd_short(liq)}`",
+        f"┣ Vol:     `{format_usd_short(vol24)}`",
+        f"┣1H:      `{format_usd_short(vol1h)}`",
         (
-            f"┗ TH        `{th}` `[{top10_total:.0f}%]`"
+            f"┗ TH:      `{th}` `[{top10_total:.0f}%]`"
             if th is not None
-            else "┗ TH        `N/A`"
+            else "┗ TH:      `N/A`"
         ),
         "",
         "👨‍💻 *Dev*",
@@ -136,8 +135,10 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
 
     lines += ["", f"`{escape_md(ca)}`"]
 
-    # Compact terminal labels.
-    lines += ["", "AXI • TRO • BONK • MAE • GMGN"]
+    links_line = " • ".join(
+        f"[{label}]({escape_url(build(ca))})" for label, build in TRADING_BOTS
+    )
+    lines += ["", links_line]
 
     if chat_id is not None and pnl_lookup.available():
         first_call = pnl_lookup.get_first_call(chat_id, ca)
@@ -270,7 +271,7 @@ def handle_leaderboard(chat_id, message_id, chat_type):
         symbol = row.get("symbol") or "UNKNOWN"
         lines.append(
             f"{rank} {_mention_row(row)} — *${escape_md(symbol)}* "
-            f"`{escape_md(f'{mult:.1f}x')}` \\({escape_md(truncate_ca(row['ca']))}\\)"
+            f"`{escape_md(f'{mult:.1f}x')}`"
         )
     send_message(chat_id, "\n".join(lines), message_id)
 

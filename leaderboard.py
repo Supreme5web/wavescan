@@ -136,8 +136,8 @@ def update_best(chat_id, ca: str, mc: float) -> None:
         print("leaderboard update_best failed:", err)
 
 
-def top_callers(chat_id, limit: int = 10):
-    """Each user's single best call in this chat, ranked by multiplier desc."""
+def top_callers(chat_id, limit: int = 15):
+    """Every call logged in this chat, ranked by multiplier desc."""
     if not available():
         return []
     try:
@@ -148,16 +148,11 @@ def top_callers(chat_id, limit: int = 10):
                 "chat_id": f"eq.{chat_id}",
                 "select": "user_id,username,first_name,ca,symbol,entry_mc,best_mc",
                 "order": "multiple.desc",
-                "limit": 50,
+                "limit": limit,
             },
             timeout=_TIMEOUT,
         )
-        rows = r.json() if r.ok else []
+        return r.json() if r.ok else []
     except Exception as err:
         print("leaderboard top_callers failed:", err)
         return []
-
-    best_per_user = {}
-    for row in rows:
-        best_per_user.setdefault(row["user_id"], row)  # first hit per user = their best (rows are pre-sorted)
-    return list(best_per_user.values())[:limit]

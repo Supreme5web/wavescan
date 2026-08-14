@@ -34,9 +34,11 @@ DEXPAPRIKA_NETWORKS = {
 
 # Quick-trade deep links shown under every token lookup / alert ping.
 TRADING_BOTS = [
-    ("AXI", lambda ca: f"https://axiom.trade/t/{ca}"),
-    ("TRO", lambda ca: f"https://t.me/menelaus_trojanbot?start=r-{ca}"),
-    ("GMGN", lambda ca: f"https://gmgn.ai/sol/token/{ca}"),
+    ("AXI", lambda ca: f"https://axiom.trade/t/{ca}/@supremee5?chain=sol"),
+    ("TRO", lambda ca: f"https://t.me/menelaus_trojanbot?start=d-supremeesol-{ca}"),
+    ("BONK", lambda ca: f"https://t.me/bonkbot_bot?start=ref_ggydi_ca_{ca}"),
+    ("MAE", lambda ca: f"https://t.me/maestro?start={ca}-hollydodson"),
+    ("GMGN", lambda ca: f"https://gmgn.ai/sol/token/supremee5_{ca}"),
 ]
 
 # Solana RPC — used only for holder-count / top-10 concentration on Solana
