@@ -1,123 +1,147 @@
-"""Solana Tracker market data for WaveScan."""
+"""Solana Tracker market-data adapter used by WaveScan."""
 
-import solanatracker
+from datetime import datetime, timezone
+import requests
 
-
-def _pool_score(pool: dict) -> float:
-    liquidity = pool.get("liquidity") or {}
-    if isinstance(liquidity, dict):
-        try:
-            return float(liquidity.get("usd") or 0)
-        except (TypeError, ValueError):
-            pass
-    return 0.0
+from config import SOLANATRACKER_API, SOLANATRACKER_API_KEY
 
 
-def _number(value, default=0.0):
+def _headers():
+    return {"x-api-key": SOLANATRACKER_API_KEY}
+
+
+def _get_json(url, params=None):
+    r = requests.get(url, headers=_headers(), params=params or {}, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
+def _first_pool(data: dict):
+    pools = data.get("pools") or []
+    if not pools:
+        return {}
+    return max(pools, key=lambda p: float((p.get("liquidity") or {}).get("usd") or 0))
+
+
+def _search_stats(ca: str):
+    """Get the flat search representation because it exposes timeframe volumes."""
     try:
-        return float(value) if value is not None else default
-    except (TypeError, ValueError):
-        return default
+        data = _get_json(
+            f"{SOLANATRACKER_API}/search",
+            {"query": ca, "limit": 5, "format": "full", "showPriceChanges": "true"},
+        )
+        rows = data.get("data") or []
+        for row in rows:
+            if row.get("mint") == ca:
+                return row
+        return rows[0] if rows else {}
+    except Exception as err:
+        print(f"Solana Tracker search failed: {err}")
+        return {}
 
 
 def fetch_best_pair(ca: str):
-    """Fetch a token from Solana Tracker's /tokens/{tokenAddress} endpoint."""
-    info = solanatracker.fetch_token_info(ca)
-    if not info:
-        return None
+    """Fetch and normalize one token from Solana Tracker's /tokens/{mint} endpoint."""
+    try:
+        data = _get_json(f"{SOLANATRACKER_API}/tokens/{ca}")
+        if not data or not data.get("token"):
+            return None
 
-    token = info.get("token") or {}
-    pools = info.get("pools") or []
-    if not pools:
-        return None
+        token = data.get("token") or {}
+        pool = _first_pool(data)
+        search = _search_stats(ca)
+        events = data.get("events") or {}
+        risk = data.get("risk") or {}
+        creation = token.get("creation") or {}
 
-    pool = max(pools, key=_pool_score)
-    price = pool.get("price") or {}
-    market_cap = pool.get("marketCap") or {}
-    liquidity = pool.get("liquidity") or {}
+        # /search gives timeframe volume and transaction fields while /tokens
+        # supplies the detailed token/pool/risk/holder payload.
+        vol24 = float(
+            search.get("volume_24h")
+            or (pool.get("txns") or {}).get("volume24h")
+            or 0
+        )
+        vol1h = float(search.get("volume_1h") or 0)
+        buys1h = int(search.get("buys") or 0)
+        sells1h = int(search.get("sells") or 0)
 
-    events = info.get("events") or {}
-    event_1h = events.get("1h") or {}
-    event_24h = events.get("24h") or {}
-    change_1h = _number(event_1h.get("priceChangePercentage"))
-    change_24h = _number(event_24h.get("priceChangePercentage"))
+        # If search is unavailable, use the token endpoint's aggregate values.
+        if not buys1h:
+            buys1h = int(data.get("buys") or 0)
+        if not sells1h:
+            sells1h = int(data.get("sells") or 0)
 
-    # The /tokens endpoint provides identity/market/holder data. The stats
-    # endpoint supplies exact timeframe trading stats such as 1h volume and
-    # 1h buys/sells/transactions.
-    stats = solanatracker.fetch_token_stats(ca)
-    stats_1h = stats.get("1h") or {}
-    stats_24h = stats.get("24h") or {}
-    volume_1h = _number((stats_1h.get("volume") or {}).get("total") if isinstance(stats_1h.get("volume"), dict) else stats_1h.get("volume"))
-    volume_24h = _number((stats_24h.get("volume") or {}).get("total") if isinstance(stats_24h.get("volume"), dict) else stats_24h.get("volume"))
+        mc_values = [
+            float((p.get("marketCap") or {}).get("usd") or 0)
+            for p in (data.get("pools") or [])
+        ]
+        mc_values = [v for v in mc_values if v > 0]
+        mc = float((pool.get("marketCap") or {}).get("usd") or 0)
+        ath_mc = max([mc] + mc_values) if mc_values else mc
 
-    price_usd = _number(price.get("usd"))
-    mc_usd = _number(market_cap.get("usd"))
-    liquidity_usd = _number(liquidity.get("usd"))
+        change24 = float((events.get("24h") or {}).get("priceChangePercentage") or 0)
+        created_ms = int((creation.get("created_time") or 0) * 1000)
+        if not created_ms:
+            created_ms = int(pool.get("createdAt") or 0)
 
-    buys_1h = int(_number(stats_1h.get("buys")))
-    sells_1h = int(_number(stats_1h.get("sells")))
-    txns_1h = int(_number(stats_1h.get("transactions") or stats_1h.get("txns")))
-    if not (buys_1h or sells_1h or txns_1h):
-        # Keep a sensible fallback if the stats endpoint is temporarily empty.
-        buys_1h = int(_number(info.get("buys")))
-        sells_1h = int(_number(info.get("sells")))
-        txns_1h = int(_number(info.get("txns")))
-    holders = int(_number(info.get("holders")))
+        socials = []
+        strict = token.get("strictSocials") or {}
+        for key, emoji_type in (("twitter", "twitter"), ("telegram", "telegram"), ("discord", "discord")):
+            url = strict.get(key)
+            if isinstance(url, str) and url:
+                socials.append({"type": emoji_type, "url": url})
+        if search.get("socials"):
+            for key, url in (search.get("socials") or {}).items():
+                if isinstance(url, str) and url and not any(s["type"] == key for s in socials):
+                    socials.append({"type": key, "url": url})
 
-    creation = token.get("creation") or {}
-    created_at = creation.get("created_time") or pool.get("createdAt")
-    if created_at:
-        created_at = int(_number(created_at))
-        if created_at < 10_000_000_000:
-            created_at *= 1000
-
-    socials = []
-    strict_socials = token.get("strictSocials") or {}
-    for key, stype in (("twitter", "twitter"), ("telegram", "telegram"), ("discord", "discord")):
-        url = strict_socials.get(key) or token.get(key)
-        if url:
-            socials.append({"type": stype, "url": url})
-
-    websites = []
-    website = token.get("website")
-    if website:
-        websites.append({"url": website})
-
-    return {
-        "chainId": "solana",
-        "pairAddress": pool.get("poolId"),
-        "pairCreatedAt": created_at,
-        "baseToken": {
-            "address": token.get("mint") or ca,
-            "name": token.get("name") or "Unknown",
-            "symbol": token.get("symbol") or "UNKNOWN",
-        },
-        "priceUsd": price_usd,
-        "marketCap": mc_usd,
-        "fdv": mc_usd,
-        "liquidity": {"usd": liquidity_usd},
-        "volume": {"h24": volume_24h, "h1": volume_1h},
-        "priceChange": {"h24": change_24h, "h1": change_1h},
-        "txns": {"h1": {"buys": buys_1h, "sells": sells_1h, "total": txns_1h}},
-        "holders": holders,
-        "info": {
+        info = {
             "imageUrl": token.get("image"),
             "socials": socials,
-            "websites": websites,
-        },
-        "_solanaTracker": info,
-    }
+            "websites": [],
+        }
+
+        return {
+            "chainId": "solana",
+            "baseToken": {
+                "address": token.get("mint") or ca,
+                "name": token.get("name") or "Unknown",
+                "symbol": token.get("symbol") or "UNKNOWN",
+            },
+            "priceUsd": float((pool.get("price") or {}).get("usd") or 0),
+            "fdv": mc,
+            "marketCap": mc,
+            "athMc": ath_mc,
+            "liquidity": {"usd": float((pool.get("liquidity") or {}).get("usd") or 0)},
+            "volume": {"h24": vol24, "h1": vol1h},
+            "priceChange": {"h24": change24},
+            "txns": {"h1": {"buys": buys1h, "sells": sells1h}},
+            "pairAddress": pool.get("poolId"),
+            "pairCreatedAt": created_ms,
+            "dexId": pool.get("market") or "unknown",
+            "info": info,
+            "events": events,
+            "risk": risk,
+            "holders": int(data.get("holders") or search.get("holders") or 0),
+            "devPercentage": float((risk.get("dev") or {}).get("percentage") or search.get("dev") or 0),
+            "devWallet": creation.get("creator") or search.get("deployer") or pool.get("deployer"),
+            "dexPaid": bool(search.get("dexPaid") or data.get("dexPaid")),
+        }
+    except requests.HTTPError as err:
+        print(f"Solana Tracker token lookup failed: {err}")
+        return None
+    except Exception as err:
+        print(f"Solana Tracker token parse failed: {err}")
+        return None
 
 
 def get_market_cap(pair: dict) -> float:
-    return _number(pair.get("marketCap") or pair.get("fdv"))
+    return float(pair.get("marketCap") or pair.get("fdv") or 0)
 
 
 def get_ath_mc(pair: dict, current_mc: float) -> float:
-    mint = (pair.get("baseToken") or {}).get("address")
-    if mint and solanatracker.available():
-        _, ath_mc = solanatracker.fetch_ath(mint)
-        if ath_mc:
-            return max(float(current_mc or 0), float(ath_mc))
-    return float(current_mc or 0)
+    return max(float(current_mc or 0), float(pair.get("athMc") or 0))
+
+
+def fetch_peak_price(chain_id: str, pool_address: str, since_ms: int) -> float:
+    return 0.0

@@ -20,9 +20,10 @@ ALERT_KEY = "alert:{chat_id}:{ca}:{user_id}"
 GROUP_CHAT_TYPES = ("group", "supergroup")
 
 START_MESSAGE = f"""
-*{BOT_NAME}* — fast Solana token lookups and market\\-cap alerts, right in Telegram\\.
+*{BOT_NAME}* — fast Solana \\& multi\\-chain token lookups and market\\-cap alerts, right in Telegram\\.
 
 Commands:
+/data `<ca>` \\- price, market cap, liquidity, volume
 /alert `<ca> <target mc>` \\- ping me when a token hits a target mc \\(e\\.g\\. `500k`, `1\\.2m`\\)
 /alerts \\- list your active alerts
 /cancel `<ca>` \\- cancel an alert
@@ -57,22 +58,26 @@ def _action_keyboard(ca: str):
 
 
 def _social_links_line(pair: dict) -> str:
-    info = pair.get("info") or {}
-    label_map = {"twitter": "Twitter", "telegram": "Telegram", "discord": "Discord"}
-    socials = sorted(info.get("socials") or [], key=lambda s: 0 if s.get("type") == "telegram" else 1)
+    socials = (pair.get("info") or {}).get("socials") or []
+    for social in socials:
+        if social.get("type") in ("twitter", "x") and social.get("url"):
+            return f"🔗 [𝕏]({escape_url(social['url'])})"
+    return ""
 
-    parts = []
-    for s in socials:
-        url = s.get("url")
-        if url:
-            stype = s.get("type")
-            label = label_map.get(stype, (stype or "Link").title())
-            emoji = _SOCIAL_EMOJI.get(stype, "🔗")
-            parts.append(f"{emoji} [{label}]({escape_url(url)})")
-    websites = info.get("websites") or []
-    if websites and websites[0].get("url"):
-        parts.append(f"🌐 [Website]({escape_url(websites[0]['url'])})")
-    return " • ".join(parts)
+
+def _fmt_change(value) -> str:
+    v = float(value or 0)
+    return f"{v:+.1f}" if v else "0.0"
+
+
+def _fmt_th(pair: dict) -> str:
+    events = pair.get("events") or {}
+    keys = ("5m", "15m", "30m", "1h", "2h")
+    values = []
+    for key in keys:
+        values.append(_fmt_change((events.get(key) or {}).get("priceChangePercentage")))
+    change24 = float((events.get("24h") or {}).get("priceChangePercentage") or 0)
+    return "| ".join(values), change24
 
 
 def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
@@ -81,90 +86,83 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     name = base.get("name") or symbol
     price = float(pair.get("priceUsd") or 0)
     mc = get_market_cap(pair)
-    liq = (pair.get("liquidity") or {}).get("usd") or 0
-    vol24 = (pair.get("volume") or {}).get("h24") or 0
-    vol1h = (pair.get("volume") or {}).get("h1") or 0
-    change24 = (pair.get("priceChange") or {}).get("h24") or 0
-    chain_id = pair.get("chainId") or "unknown"
-    pool = pair.get("pairAddress")
-    created_ms = pair.get("pairCreatedAt")
+    ath_mc = get_ath_mc(pair, mc)
+    liq = float((pair.get("liquidity") or {}).get("usd") or 0)
+    vol24 = float((pair.get("volume") or {}).get("h24") or 0)
+    vol1h = float((pair.get("volume") or {}).get("h1") or 0)
     txns1h = (pair.get("txns") or {}).get("h1") or {}
-    buys1h, sells1h = txns1h.get("buys", 0), txns1h.get("sells", 0)
-    info = pair.get("info") or {}
+    buys1h = int(txns1h.get("buys") or 0)
+    sells1h = int(txns1h.get("sells") or 0)
+    created_ms = pair.get("pairCreatedAt") or 0
+    dex = str(pair.get("dexId") or "Unknown").replace("-", " ").title()
+    holders = int(pair.get("holders") or 0)
+    dev_pct = float(pair.get("devPercentage") or 0)
+    dev_wallet = pair.get("devWallet") or ""
+    dex_paid = bool(pair.get("dexPaid"))
+    th, change24 = _fmt_th(pair)
 
-    # All-time-high market cap from Solana Tracker's indexed /ath endpoint.
-    ath_mc = get_ath_mc(pair, mc)
+    age = format_age(created_ms)
+    if age == "0m":
+        age = "<1m"
 
-    holders = pair.get("holders")
-    info = pair.get("info") or {}
-
-    # All-time-high market cap from Solana Tracker's indexed /ath endpoint.
-    ath_mc = get_ath_mc(pair, mc)
-
-
-    change_arrow = "🟢" if change24 >= 0 else "🔴"
-    change_sign = "+" if change24 >= 0 else ""
+    dev_status = f"Holding 🚫 ({dev_pct:.1f}%)" if dev_pct > 0 else "Not Holding ✅ (0.0%)"
+    wallet_short = f"{dev_wallet[:4]}...{dev_wallet[-4:]}" if len(dev_wallet) > 10 else (dev_wallet or "N/A")
+    paid_line = "✅ Paid" if dex_paid else "❌ Not Paid"
 
     lines = [
-        f"💸 {escape_md(name)} \\(${escape_md(symbol)}\\) • {escape_md(chain_id.title())}",
+        f"💸 *(${escape_md(symbol)})* {escape_md(name)} | ⌛{escape_md(age)} | {escape_md(dex)}",
         "",
-        "📊  METRICS",
-        f"├ 💰 MC: `{format_usd_short(mc)}` `(ATH: {format_usd_short(ath_mc)})`",
-        f"├ 💵 Price: `{format_price(price)}` `{change_arrow} {change_sign}{change24:.1f}%`",
+        f"┏💰 MC: `{format_usd_short(mc)}` (ATH `{format_usd_short(ath_mc)}`)",
+        f"├ 💵 Price: `{format_price(price)}`",
         f"├ 💧 Liquidity: `{format_usd_short(liq) if liq else 'N/A'}`",
-        f"└ 📊 Vol: `{format_usd_short(vol24)}` `| 1H: {format_usd_short(vol1h)}`",
+        f"├📊 Vol: `{format_usd_short(vol24)}`",
+        f"├1H: `{format_usd_short(vol1h)}`",
+        f"┗ TH        `{th}` `[{change24:.0f}%]`",
+        "",
+        "👨‍💻 *Dev*",
+        "┏ Status     " + escape_md(dev_status),
+        "┣ Wallet      `" + escape_md(wallet_short) + "`",
+        "┗ DEX Paid    " + escape_md(paid_line),
     ]
 
     socials_line = _social_links_line(pair)
     if socials_line:
         lines += ["", socials_line]
 
-    lines += [
-        "",
-        f"├ 🔄 1H Trades: `🔴{sells1h:,}/🟢{buys1h:,}`",
-    ]
-    if holders is not None:
-        lines.append(f"├ 👥 Holders: `{int(holders):,}`")
-    lines.append(f"├ ⏱️ Age: `{format_age(created_ms)}`")
+    lines += ["", f"`{escape_md(ca)}`"]
 
-    lines += ["", f" `{ca}`"]
+    # Compact terminal labels.
+    lines += ["", "AXI • TRO • BONK • MAE • GMGN"]
 
     if chat_id is not None and pnl_lookup.available():
         first_call = pnl_lookup.get_first_call(chat_id, ca)
         if first_call:
             scanner = first_call.get("username") or first_call.get("first_name") or "someone"
             entry_mc = float(first_call.get("entry_mc") or 0)
-            increase = ((mc - entry_mc) / entry_mc * 100.0) if entry_mc > 0 else 0.0
-            multiple = (mc / entry_mc) if entry_mc > 0 else 0.0
-            if multiple >= 2.0:
-                progress = f"{multiple:.1f}x" if multiple < 10 else f"{multiple:.0f}x"
+            mult = mc / entry_mc if entry_mc else 0
+            if mult >= 2:
+                perf = f"{mult:.1f}x"
             else:
-                sign = "+" if increase >= 0 else ""
-                progress = f"{sign}{increase:.0f}%"
-            lines += ["", f"1st scanned by {escape_md(scanner)} @ {escape_md(_fmt_plain_compact(entry_mc))} [{escape_md(progress)}]"]
+                perf = f"{(mult - 1) * 100:+.0f}%"
+            lines += ["", f"1st scanned by {escape_md(scanner)} @ {escape_md(_fmt_plain_compact(entry_mc))} [{escape_md(perf)}]"]
 
     return "\n".join(lines)
 
 
-def handle_token(chat_id, ca, message_id, user=None, chat_type=None):
+def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
     if not ca or not CA_RE.fullmatch(ca):
-        send_message(chat_id, "Usage: send the contract address directly.", message_id)
+        send_message(chat_id, "Send a valid Solana contract address directly.", message_id)
         return
     pair = fetch_best_pair(ca)
     if not pair:
         send_message(chat_id, f"❌ No pair found for `{escape_md(truncate_ca(ca))}`", message_id)
         return
 
-    # Every direct CA message is a call. Record it before sending the card.
-    if user and user.get("id"):
+    if user and user.get("id") and leaderboard.available():
         mc = get_market_cap(pair)
         symbol = ((pair.get("baseToken") or {}).get("symbol") or "UNKNOWN").upper()
-        print(
-            f"[CALL] chat={chat_id} user={user.get('id')} ca={ca} "
-            f"symbol={symbol} mc={mc}"
-        )
-        if not leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId") or "solana", mc):
-            print(f"[CALL] Supabase insert failed: chat={chat_id} ca={ca} mc={mc}")
+        if not leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId"), mc):
+            print(f"leaderboard record_call did not persist for chat={chat_id} ca={ca} mc={mc}")
 
     caption = _build_token_message(pair, ca, chat_id)
     keyboard = _action_keyboard(ca)
@@ -284,20 +282,10 @@ def handle_pnl(chat_id, text, message_id):
 
     call = pnl_lookup.get_first_call(chat_id, ca)
     if not call:
-        send_message(chat_id, "Nobody in this chat has called this token yet\. Post the CA to log the first call\!", message_id)
+        send_message(chat_id, "Nobody in this chat has called this token yet\\. Post the CA to log the first call\\!", message_id)
         return
 
-    # Always take a fresh Solana Tracker snapshot when PNL is requested.
-    # This prevents a PNL card from showing 1.00x simply because the periodic
-    # leaderboard sweep has not run since the token moved.
     pair = fetch_best_pair(ca)
-    current_mc = get_market_cap(pair) if pair else 0.0
-    if current_mc > 0:
-        leaderboard.update_best(chat_id, ca, current_mc)
-        refreshed_call = pnl_lookup.get_first_call(chat_id, ca)
-        if refreshed_call:
-            call = refreshed_call
-
     base = (pair or {}).get("baseToken") or {}
     token_name = base.get("name") or call.get("symbol") or "Unknown"
     token_symbol = base.get("symbol") or call.get("symbol") or "?"
@@ -323,7 +311,7 @@ def handle_pnl(chat_id, text, message_id):
 
 
 def handle_callback(callback_query: dict):
-    """Handles the Refresh and Delete buttons under a token card."""
+    """Handles the Refresh and Delete buttons under a /data card."""
     cq_id = callback_query["id"]
     data = callback_query.get("data") or ""
     message = callback_query.get("message") or {}
@@ -357,11 +345,6 @@ def handle_callback(callback_query: dict):
     if not pair:
         answer_callback_query(cq_id, "❌ No pair found", show_alert=True)
         return
-
-    # A manual refresh is also a leaderboard/PNL peak checkpoint.
-    current_mc = get_market_cap(pair)
-    if current_mc > 0:
-        leaderboard.update_best(chat_id, ca, current_mc)
 
     caption = _build_token_message(pair, ca, chat_id)
     keyboard = _action_keyboard(ca)
@@ -411,5 +394,4 @@ def handle_update(update: dict):
     elif text.startswith("/pnl"):
         handle_pnl(chat_id, text, message_id)
     elif CA_RE.fullmatch(text):
-        # A bare CA is the token lookup/call action. There is no /data command.
-        handle_token(chat_id, text, message_id, user, chat_type)
+        handle_data(chat_id, text, message_id, user, chat_type)
