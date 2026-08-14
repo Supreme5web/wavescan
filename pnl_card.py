@@ -20,9 +20,9 @@ BASE_DIR = os.path.dirname(__file__)
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 
 # New UI background. The first path is for a normal project layout.
-TEMPLATE_PATH = os.path.join(ASSETS_DIR, "pnl_card_new_ui.png")
+TEMPLATE_PATH = os.path.join(ASSETS_DIR, "pnl_card_template")
 if not os.path.exists(TEMPLATE_PATH):
-    TEMPLATE_PATH = os.path.join(BASE_DIR, "pnl_card_new_ui.png")
+    TEMPLATE_PATH = os.path.join(BASE_DIR, "pnl_card_template.png")
 
 FONT_DIR = os.path.join(ASSETS_DIR, "fonts")
 FONT_BOLD = os.path.join(FONT_DIR, "Rajdhani-Bold.ttf")
