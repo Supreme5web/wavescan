@@ -1,15 +1,13 @@
 import os
-import secrets
 import time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote
 
 import leaderboard
 import pnl_card
 import pnl_lookup
 import solana
 import storage
-from config import BOT_NAME, BOT_USERNAME, PUBLIC_BASE_URL, TRADING_BOTS
+from config import BOT_NAME, BOT_USERNAME, TRADING_BOTS
 from market import fetch_best_pair, get_ath_mc, get_market_cap
 from telegram import (
     send_message, send_photo_file, delete_message, answer_callback_query,
@@ -56,15 +54,15 @@ def _action_keyboard(ca: str):
     ]]}
 
 
-def _card_url(image_url: str) -> str:
-    """Wraps the token's own logo URL in a fresh-nonce /card/<nonce> page
-    (see app.py) whose only job is an og:image meta tag pointing at it —
-    Telegram scrapes the page and renders the logo as a link-preview embed
-    instead of an uploaded sendPhoto. The random nonce means Telegram never
-    treats this as a URL it's already scraped, so it won't serve a stale
-    cached image from an earlier lookup of the same token."""
-    nonce = secrets.token_hex(6)
-    return f"{PUBLIC_BASE_URL}/card/{nonce}?img={quote(image_url, safe='')}"
+def _display_image(pair: dict):
+    """The image used for the link-preview embed. Dexscreener exposes both
+    a small round token logo (imageUrl) and, once a token has migrated off
+    a bonding-curve launchpad onto a real DEX with actual trading history,
+    a wider banner (header) — prefer the banner when it's there.
+    Swap "header" for "openGraph" here if you find that field is the one
+    actually populated with the banner in your payloads."""
+    info = pair.get("info") or {}
+    return info.get("header") or info.get("imageUrl")
 
 
 def _social_links_line(pair: dict) -> str:
@@ -208,12 +206,11 @@ def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
 
     caption = _build_token_message(pair, ca, chat_id)
     keyboard = _action_keyboard(ca)
-    image_url = (pair.get("info") or {}).get("imageUrl")
 
-    # Token's own logo, embedded as a link preview (see app.py's
-    # /card/<nonce> route) rather than uploaded via sendPhoto.
-    preview_url = _card_url(image_url) if image_url else None
-    send_message(chat_id, caption, message_id, keyboard, preview_url=preview_url)
+    # Token's own banner/logo, embedded directly as the link-preview image
+    # (no wrapper page of ours involved, so Telegram shows just the picture
+    # with no site-name bar) instead of uploaded via sendPhoto.
+    send_message(chat_id, caption, message_id, keyboard, preview_url=_display_image(pair))
 
 
 def handle_alert(chat_id, text, message_id, user):
@@ -462,20 +459,14 @@ def handle_callback(callback_query: dict):
     caption = _build_token_message(pair, ca, chat_id)
     keyboard = _action_keyboard(ca)
     has_photo = bool(message.get("photo"))
-    image_url = (pair.get("info") or {}).get("imageUrl")
 
     # has_photo means this card predates the link-preview switch (it was
     # sent via sendPhoto) — its caption can still be edited in place, but
-    # it can't retroactively become a link-preview message. New cards are
-    # plain text with a link preview, refreshed to a fresh nonce each time
-    # so Telegram rescrapes rather than reusing a stale image.
+    # it can't retroactively become a link-preview message.
     result = (
         edit_message_caption(chat_id, message_id, caption, keyboard)
         if has_photo else
-        edit_message_text(
-            chat_id, message_id, caption, keyboard,
-            preview_url=_card_url(image_url) if image_url else None,
-        )
+        edit_message_text(chat_id, message_id, caption, keyboard, preview_url=_display_image(pair))
     )
 
     if result is None:
