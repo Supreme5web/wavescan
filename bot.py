@@ -116,35 +116,37 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     )
 
     lines = [
-        f"💸 *\\(${escape_md(symbol)}\\)* {escape_md(name)} \\| ⌛{escape_md(age)} \\| {escape_md(dex)}",
+        f"🍪 *_\\(${escape_md(symbol)}\\) {escape_md(name)} • ⌛{escape_md(age)} • {escape_md(dex)}_*",
         "",
-        f"┏ MC:      *{escape_md(format_usd_short(mc))}* \\(ATH *{escape_md(format_usd_short(ath_mc))}*\\)",
-        f"┣ Price:   *{escape_md(format_price(price))}*",
-        f"┣ LP:      *{escape_md(format_usd_short(liq))}*",
-        f"┣ Vol:     *{escape_md(format_usd_short(vol24))}*",
-        f"┣1H:      *{escape_md(format_usd_short(vol1h))}*",
+        f"┏ *_💰 MC {escape_md(format_usd_short(mc))}  \\(ATH {escape_md(format_usd_short(ath_mc))}\\)_*",
+        f"┣ *_💵 Price {escape_md(format_price(price))}_*",
+        f"┣ *_💧 LP {escape_md(format_usd_short(liq))}_*",
+        f"┣ *_📊 Vol {escape_md(format_usd_short(vol24))}_*",
+        f"┣ *_⏱ 1H {escape_md(format_usd_short(vol1h))}_*",
         (
-            f"┗ TH:      {th} *\\[{top10_total:.0f}%\\]*"
+            f"┗ *_🎯 TH {th} \\({top10_total:.0f}%\\)_*"
             if th is not None
-            else "┗ TH:      *N/A*"
+            else "┗ *_🎯 TH N/A_*"
         ),
         "",
-        "👨‍💻 *Dev*",
-        "┏ Status     *" + escape_md(dev_status) + "*",
-        "┣ Wallet      " + wallet_link,
-        "┗ DEX Paid    *" + escape_md(paid_line) + "*",
+        "👨‍💻 *_Dev_*",
+        f"┏ *_Status {escape_md(dev_status)}_*",
+        f"┣ *_Wallet {wallet_link}_*",
+        f"┗ *_DEX Paid {escape_md(paid_line)}_*",
     ]
 
     socials_line = _social_links_line(pair)
     if socials_line:
-        lines += ["", socials_line]
+        lines += ["", f"*_{socials_line}_*"]
 
+    # Left as plain monospace (not bold/italic) so the address stays
+    # tap-to-copy in Telegram.
     lines += ["", f"`{escape_md(ca)}`"]
 
     links_line = " • ".join(
         f"[{label}]({escape_url(build(ca))})" for label, build in TRADING_BOTS
     )
-    lines += ["", links_line]
+    lines += ["", f"*_{links_line}_*"]
 
     if chat_id is not None and pnl_lookup.available():
         first_call = pnl_lookup.get_first_call(chat_id, ca)
@@ -159,13 +161,13 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
             jump_link = _jump_link(chat_id, first_call.get("message_id"))
 
             footer = (
-                f"*💢[{escape_md(scanner)}]({escape_url(deep_link)}) @ "
-                f"{escape_md(format_usd_short(entry_mc))} \\[{escape_md(perf)}\\]"
+                f"*_⚪[{escape_md(scanner)}]({escape_url(deep_link)}) @ "
+                f"{escape_md(format_usd_short(entry_mc))} \\({escape_md(perf)}\\)"
             )
             if jump_link:
-                footer += f" \\([{escape_md(age)}]({escape_url(jump_link)}) ago\\)*"
+                footer += f" \\([{escape_md(age)}]({escape_url(jump_link)}) ago\\)_*"
             else:
-                footer += f" \\({escape_md(age)} ago\\)*"
+                footer += f" \\({escape_md(age)} ago\\)_*"
 
             lines += ["", footer]
 
