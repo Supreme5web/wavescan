@@ -130,6 +130,7 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     dev_pct = float(pair.get("devPercentage") or 0)
     dev_wallet = pair.get("devWallet") or ""
     dex_paid = bool(pair.get("dexPaid"))
+    cto_approved = bool(pair.get("ctoApproved"))
     sniper_count = int(pair.get("sniperCount") or 0)
     sniper_pct = float(pair.get("sniperPercentage") or 0)
     fees_sol = pair.get("feesSol")
@@ -149,6 +150,16 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
         if dev_wallet else escape_md(wallet_short)
     )
 
+    dev_lines = [
+        "👨‍💻 *_Dev_*",
+        f"┏ *_Status  {escape_md(dev_status)}_*",
+        f"┣ *_Wallet  {wallet_link}_*",
+        f"┣ *_DEX Paid  {escape_md(paid_line)}_*",
+    ]
+    if cto_approved:
+        dev_lines.append(f"┣ *_CTO  {escape_md('✅ Approved')}_*")
+    dev_lines.append(f"┗ *_Fees  {escape_md(fees_line)}_*")
+
     lines = [
         f"🍪 *_\\(${escape_md(symbol)}\\) {escape_md(name)} • ⌛{escape_md(age)} • {escape_md(dex)}_*",
         "",
@@ -165,11 +176,7 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
             else "┗ *_🎯 TH  N/A_*"
         ),
         "",
-        "👨‍💻 *_Dev_*",
-        f"┏ *_Status  {escape_md(dev_status)}_*",
-        f"┣ *_Wallet  {wallet_link}_*",
-        f"┣ *_DEX Paid  {escape_md(paid_line)}_*",
-        f"┗ *_Fees  {escape_md(fees_line)}_*",
+        *dev_lines,
     ]
 
     socials_line = _social_links_line(pair)

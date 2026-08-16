@@ -17,6 +17,27 @@ def _get_json(url, params=None):
     return r.json()
 
 
+def _fetch_dex_orders(ca: str):
+    """DexScreener's paid-orders ledger for a token — tokenProfile approval
+    is the classic 'Dex Paid' checkmark; communityTakeover approval is a
+    separate CTO signal. Response shape observed live is
+    {"orders": [...], "boosts": [...]}, but tolerate a bare list too in
+    case DexScreener reverts to the older shape."""
+    try:
+        r = requests.get(
+            f"https://api.dexscreener.com/orders/v1/solana/{ca}", timeout=8
+        )
+        if not r.ok:
+            return []
+        data = r.json()
+        if isinstance(data, list):
+            return data
+        return (data or {}).get("orders") or []
+    except Exception as err:
+        print("dexscreener orders fetch failed:", err)
+        return []
+
+
 def _first_pool(data: dict):
     pools = data.get("pools") or []
     if not pools:
@@ -125,6 +146,16 @@ def fetch_best_pair(ca: str):
             "websites": [],
         }
 
+        orders = _fetch_dex_orders(ca)
+        dex_paid = any(
+            o.get("type") == "tokenProfile" and o.get("status") == "approved"
+            for o in orders
+        )
+        cto_approved = any(
+            o.get("type") == "communityTakeover" and o.get("status") == "approved"
+            for o in orders
+        )
+
         snipers = risk.get("snipers") or {}
         sniper_count = int(snipers.get("count") or 0)
         sniper_pct = float(snipers.get("totalPercentage") or 0)
@@ -165,7 +196,8 @@ def fetch_best_pair(ca: str):
             "holders": int(data.get("holders") or search.get("holders") or 0),
             "devPercentage": float((risk.get("dev") or {}).get("percentage") or search.get("dev") or 0),
             "devWallet": creation.get("creator") or search.get("deployer") or pool.get("deployer"),
-            "dexPaid": bool(search.get("dexPaid") or data.get("dexPaid")),
+            "dexPaid": dex_paid,
+            "ctoApproved": cto_approved,
             "sniperCount": sniper_count,
             "sniperPercentage": sniper_pct,
             "feesSol": fees_sol,
