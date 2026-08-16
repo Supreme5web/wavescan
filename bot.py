@@ -2,6 +2,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 
+import dexscreener
 import leaderboard
 import pnl_card
 import pnl_lookup
@@ -54,15 +55,18 @@ def _action_keyboard(ca: str):
     ]]}
 
 
-def _display_image(pair: dict):
-    """The image used for the link-preview embed. Dexscreener exposes both
-    a small round token logo (imageUrl) and, once a token has migrated off
-    a bonding-curve launchpad onto a real DEX with actual trading history,
-    a wider banner (header) — prefer the banner when it's there.
-    Swap "header" for "openGraph" here if you find that field is the one
-    actually populated with the banner in your payloads."""
-    info = pair.get("info") or {}
-    return info.get("header") or info.get("imageUrl")
+def _display_image(pair: dict, ca: str):
+    """Prefer Dexscreener's migrated-token banner over the plain Solana
+    Tracker logo. Only bother checking once a token has actually left the
+    Pump.fun bonding curve for a real AMM pool (dexId != "pumpfun") — that's
+    the only time Dexscreener has a banner to show, and skipping the extra
+    lookup otherwise keeps /data fast for tokens still on the curve."""
+    logo = (pair.get("info") or {}).get("imageUrl")
+    if (pair.get("dexId") or "").lower() != "pumpfun":
+        banner = dexscreener.fetch_banner(ca)
+        if banner:
+            return banner
+    return logo
 
 
 def _social_links_line(pair: dict) -> str:
@@ -210,7 +214,7 @@ def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
     # Token's own banner/logo, embedded directly as the link-preview image
     # (no wrapper page of ours involved, so Telegram shows just the picture
     # with no site-name bar) instead of uploaded via sendPhoto.
-    send_message(chat_id, caption, message_id, keyboard, preview_url=_display_image(pair))
+    send_message(chat_id, caption, message_id, keyboard, preview_url=_display_image(pair, ca))
 
 
 def handle_alert(chat_id, text, message_id, user):
@@ -466,7 +470,7 @@ def handle_callback(callback_query: dict):
     result = (
         edit_message_caption(chat_id, message_id, caption, keyboard)
         if has_photo else
-        edit_message_text(chat_id, message_id, caption, keyboard, preview_url=_display_image(pair))
+        edit_message_text(chat_id, message_id, caption, keyboard, preview_url=_display_image(pair, ca))
     )
 
     if result is None:
