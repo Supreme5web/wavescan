@@ -2,6 +2,7 @@ import os
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import leaderboard
 import pnl_card
@@ -55,13 +56,15 @@ def _action_keyboard(ca: str):
     ]]}
 
 
-def _card_url(ca: str) -> str:
-    """Fresh URL per render, pointing at the /card/<ca>/<nonce> page in
-    app.py. The random nonce means Telegram's link-preview scraper always
-    treats it as a URL it's never seen, so it never serves a stale cache
-    from an earlier render of the same token."""
+def _card_url(image_url: str) -> str:
+    """Wraps the token's own logo URL in a fresh-nonce /card/<nonce> page
+    (see app.py) whose only job is an og:image meta tag pointing at it —
+    Telegram scrapes the page and renders the logo as a link-preview embed
+    instead of an uploaded sendPhoto. The random nonce means Telegram never
+    treats this as a URL it's already scraped, so it won't serve a stale
+    cached image from an earlier lookup of the same token."""
     nonce = secrets.token_hex(6)
-    return f"{PUBLIC_BASE_URL}/card/{ca}/{nonce}"
+    return f"{PUBLIC_BASE_URL}/card/{nonce}?img={quote(image_url, safe='')}"
 
 
 def _social_links_line(pair: dict) -> str:
@@ -205,11 +208,12 @@ def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
 
     caption = _build_token_message(pair, ca, chat_id)
     keyboard = _action_keyboard(ca)
+    image_url = (pair.get("info") or {}).get("imageUrl")
 
-    # Server-rendered overlay, embedded as a link preview (see app.py's
-    # /card/<ca>/<nonce> route + token_card.py) rather than uploaded via
-    # sendPhoto.
-    send_message(chat_id, caption, message_id, keyboard, preview_url=_card_url(ca))
+    # Token's own logo, embedded as a link preview (see app.py's
+    # /card/<nonce> route) rather than uploaded via sendPhoto.
+    preview_url = _card_url(image_url) if image_url else None
+    send_message(chat_id, caption, message_id, keyboard, preview_url=preview_url)
 
 
 def handle_alert(chat_id, text, message_id, user):
@@ -458,6 +462,7 @@ def handle_callback(callback_query: dict):
     caption = _build_token_message(pair, ca, chat_id)
     keyboard = _action_keyboard(ca)
     has_photo = bool(message.get("photo"))
+    image_url = (pair.get("info") or {}).get("imageUrl")
 
     # has_photo means this card predates the link-preview switch (it was
     # sent via sendPhoto) — its caption can still be edited in place, but
@@ -467,7 +472,10 @@ def handle_callback(callback_query: dict):
     result = (
         edit_message_caption(chat_id, message_id, caption, keyboard)
         if has_photo else
-        edit_message_text(chat_id, message_id, caption, keyboard, preview_url=_card_url(ca))
+        edit_message_text(
+            chat_id, message_id, caption, keyboard,
+            preview_url=_card_url(image_url) if image_url else None,
+        )
     )
 
     if result is None:
