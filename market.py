@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import requests
 
 from config import SOLANATRACKER_API, SOLANATRACKER_API_KEY
-from solanatracker import fetch_ath
+from solanatracker import fetch_ath, fetch_token_stats
 
 
 def _headers():
@@ -62,18 +62,24 @@ def fetch_best_pair(ca: str):
             or (pool.get("txns") or {}).get("volume24h")
             or 0
         )
-        pool_txns = pool.get("txns") or {}
-        # Solana Tracker pool.txns can show up either flat ("volume1h") or
-        # bucketed per-timeframe ("1h": {"volume": ...}) depending on
-        # endpoint/version, so check both shapes before falling back.
-        tf_1h = pool_txns.get("1h") if isinstance(pool_txns.get("1h"), dict) else {}
-        vol1h = float(
-            search.get("volume_1h")
-            or pool_txns.get("volume1h")
-            or tf_1h.get("volume")
-            or tf_1h.get("volumeUsd")
-            or 0
-        )
+        # /tokens/{mint}'s pool.txns only carries cumulative "volume" and
+        # "volume24h" — confirmed via a live sample, there's no 1h bucket
+        # anywhere in that payload. /stats/{mint} is the endpoint actually
+        # built for per-timeframe numbers, so that's what backs 1H here.
+        # Schema unconfirmed beyond the top-level timeframe keys (mirrors
+        # the "events" priceChangePercentage buckets already on /tokens),
+        # so this checks a couple of plausible shapes for the volume value.
+        vol1h = 0.0
+        stats = fetch_token_stats(ca)
+        tf_stats = stats.get("1h") if isinstance(stats.get("1h"), dict) else {}
+        if tf_stats:
+            v = tf_stats.get("volume")
+            if isinstance(v, dict):
+                vol1h = float(v.get("total") or v.get("usd") or 0)
+            else:
+                vol1h = float(v or 0)
+        if not vol1h:
+            vol1h = float(search.get("volume_1h") or 0)
         buys1h = int(search.get("buys") or 0)
         sells1h = int(search.get("sells") or 0)
 
@@ -123,25 +129,17 @@ def fetch_best_pair(ca: str):
         sniper_count = int(snipers.get("count") or 0)
         sniper_pct = float(snipers.get("totalPercentage") or 0)
 
-        # NOTE: creator/dev fees-earned isn't confirmed in Solana Tracker's
-        # public docs — trying the field names that would fit this payload
-        # shape. Falls back to None (rendered as N/A) if none are present.
+        # Confirmed from a live sample: risk.fees.total is the aggregate
+        # SOL paid in trading + tip fees for this token across all
+        # frontends/bots (helius-sender, jito, bloom, etc.), NOT a
+        # creator-only figure.
         fees_sol = None
-        for src in (pool, token, risk, data):
-            if not isinstance(src, dict):
-                continue
-            for key in ("creatorFeesSol", "creatorFees", "totalFeesSol", "feesSol", "fees"):
-                val = src.get(key)
-                if isinstance(val, dict):
-                    val = val.get("sol") or val.get("total")
-                if val is not None:
-                    try:
-                        fees_sol = float(val)
-                        break
-                    except (TypeError, ValueError):
-                        continue
-            if fees_sol is not None:
-                break
+        fees_obj = risk.get("fees") or {}
+        if isinstance(fees_obj, dict) and fees_obj.get("total") is not None:
+            try:
+                fees_sol = float(fees_obj["total"])
+            except (TypeError, ValueError):
+                fees_sol = None
 
         return {
             "chainId": "solana",
