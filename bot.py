@@ -110,7 +110,9 @@ def _fmt_top_holders(ca: str, chain_id: str):
     return values, top10_total
 
 
-def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
+def _build_token_message(
+    pair: dict, ca: str, chat_id=None, chat_type=None, is_first_scan=False, scanning_user=None
+) -> str:
     base = pair.get("baseToken") or {}
     symbol = (base.get("symbol") or "UNKNOWN").upper()
     name = base.get("name") or symbol
@@ -141,7 +143,7 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
         age = "<1m"
     age = re.sub(r"\s*days?\b", "d", age, flags=re.I)  # "60 days" -> "60d"
 
-    dev_status = "Hold 🚫" if dev_pct > 0 else "Sold✅"
+    dev_status = f"Hold 🚫 ({dev_pct:.0f}%)" if dev_pct > 0 else "Sold✅"
     wallet_short = f"{dev_wallet[:4]}...{dev_wallet[-4:]}" if len(dev_wallet) > 10 else (dev_wallet or "N/A")
     paid_line = "✅ Paid" if dex_paid else "❌ Not Paid"
     fees_line = f"{fees_sol:.2f} SOL" if fees_sol is not None else "N/A"
@@ -163,7 +165,7 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     lines = [
         f"🍪 *_\\(${escape_md(symbol)}\\) {escape_md(name)} • ⌛{escape_md(age)} • {escape_md(dex)}_*",
         "",
-        f"┏ *_💰 MC  {escape_md(format_usd_short(mc))}  \\(ATH {escape_md(format_usd_short(ath_mc))}\\)_*",
+        f"┏ *_💰 MC {escape_md(format_usd_short(mc))} \\(ATH {escape_md(format_usd_short(ath_mc))}\\)_*",
         f"┣ *_💵 Price  {escape_md(format_price(price))}_*",
         f"┣ *_💧 LP  {escape_md(format_usd_short(liq))}_*",
         f"┣ *_📊 Vol  {escape_md(format_usd_short(vol24))}_*",
@@ -193,27 +195,43 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     lines += ["", f"*_{links_line}_*"]
 
     if chat_id is not None and pnl_lookup.available():
-        first_call = pnl_lookup.get_first_call(chat_id, ca)
-        if first_call:
-            scanner = first_call.get("username") or first_call.get("first_name") or "someone"
-            entry_mc = float(first_call.get("entry_mc") or 0)
-            mult = mc / entry_mc if entry_mc else 0
-            perf = f"{mult:.1f}x" if mult >= 2 else f"{(mult - 1) * 100:.0f}%"
-
-            deep_link = f"https://t.me/{BOT_USERNAME}?start=call_{chat_id}_{first_call.get('user_id', '')}"
-            age = format_age(parse_iso_ms(first_call.get("called_at")))
-            jump_link = _jump_link(chat_id, first_call.get("message_id"))
-
-            footer = (
-                f"*_⚪[{escape_md(scanner)}]({escape_url(deep_link)}) @ "
-                f"{escape_md(format_usd_short(entry_mc))} \\({escape_md(perf)}\\)"
+        # A token's very first scan in a group gets a short "Called first
+        # by" line instead of the full performance footer below — the
+        # detailed version only makes sense once there's history to show.
+        # Every subsequent look (including Refresh) falls through to the
+        # normal branch. Direct bot-chat scans skip this entirely since
+        # there's no group leaderboard context to call "first" against.
+        if is_first_scan and chat_type in GROUP_CHAT_TYPES and scanning_user:
+            username = scanning_user.get("username")
+            scanner = username or scanning_user.get("first_name") or "someone"
+            mention = (
+                f"[@{escape_md(scanner)}](https://t.me/{scanner})"
+                if username else escape_md(scanner)
             )
-            if jump_link:
-                footer += f" \\([{escape_md(age)}]({escape_url(jump_link)}) ago\\)_*"
-            else:
-                footer += f" \\({escape_md(age)} ago\\)_*"
-
+            footer = f"*_🥇 Called first by {mention} @ {escape_md(format_usd_short(mc))}_*"
             lines += ["", footer]
+        else:
+            first_call = pnl_lookup.get_first_call(chat_id, ca)
+            if first_call:
+                scanner = first_call.get("username") or first_call.get("first_name") or "someone"
+                entry_mc = float(first_call.get("entry_mc") or 0)
+                mult = mc / entry_mc if entry_mc else 0
+                perf = f"{mult:.1f}x" if mult >= 2 else f"{(mult - 1) * 100:.0f}%"
+
+                deep_link = f"https://t.me/{BOT_USERNAME}?start=call_{chat_id}_{first_call.get('user_id', '')}"
+                age = format_age(parse_iso_ms(first_call.get("called_at")))
+                jump_link = _jump_link(chat_id, first_call.get("message_id"))
+
+                footer = (
+                    f"*_⚪[{escape_md(scanner)}]({escape_url(deep_link)}) @ "
+                    f"{escape_md(format_usd_short(entry_mc))} \\({escape_md(perf)}\\)"
+                )
+                if jump_link:
+                    footer += f" \\([{escape_md(age)}]({escape_url(jump_link)}) ago\\)_*"
+                else:
+                    footer += f" \\({escape_md(age)} ago\\)_*"
+
+                lines += ["", footer]
 
     return "\n".join(lines)
 
@@ -227,9 +245,15 @@ def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
         send_message(chat_id, f"❌ No pair found for `{escape_md(truncate_ca(ca))}`", message_id)
         return
 
+    is_first_scan = False
     if leaderboard.available():
         mc = get_market_cap(pair)
         if user and user.get("id"):
+            # Must check before record_call inserts this user's row, and
+            # only matters in groups — the leaderboard/"first call" concept
+            # doesn't apply to a 1:1 chat with the bot.
+            if chat_type in GROUP_CHAT_TYPES and pnl_lookup.available():
+                is_first_scan = not pnl_lookup.get_first_call(chat_id, ca)
             symbol = ((pair.get("baseToken") or {}).get("symbol") or "UNKNOWN").upper()
             if not leaderboard.record_call(chat_id, user, ca, symbol, pair.get("chainId"), mc, message_id):
                 print(f"leaderboard record_call did not persist for chat={chat_id} ca={ca} mc={mc}")
@@ -237,7 +261,9 @@ def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
         # sweep, so /pnl and /leaderboard reflect the current price sooner.
         leaderboard.update_best(chat_id, ca, mc)
 
-    caption = _build_token_message(pair, ca, chat_id)
+    caption = _build_token_message(
+        pair, ca, chat_id, chat_type=chat_type, is_first_scan=is_first_scan, scanning_user=user
+    )
     keyboard = _action_keyboard(ca)
 
     # Token's own banner/logo, embedded directly as the link-preview image
@@ -326,10 +352,13 @@ LB_DEFAULT_PERIOD = "1d"
 
 
 def _leaderboard_keyboard(period: str):
-    return {"inline_keyboard": [[
-        {"text": f"• {p} •" if p == period else p, "callback_data": f"lb:{p}"}
-        for p in LB_PERIODS
-    ]]}
+    return {"inline_keyboard": [
+        [
+            {"text": f"🔵 {p}" if p == period else p, "callback_data": f"lb:{p}"}
+            for p in LB_PERIODS
+        ],
+        [{"text": "🗑️ Delete", "callback_data": "lb_delete"}],
+    ]}
 
 
 def _build_leaderboard_message(chat_id, period: str) -> str:
@@ -446,6 +475,21 @@ def handle_callback(callback_query: dict):
     if data == "delete":
         # Restrict deletion to whoever triggered the original lookup — our
         # card is always sent as a reply to that command/CA message.
+        requester_id = ((message.get("reply_to_message") or {}).get("from") or {}).get("id")
+        caller_id = (callback_query.get("from") or {}).get("id")
+        if requester_id and caller_id != requester_id:
+            answer_callback_query(cq_id, "🚫 Only the person who requested this can delete it", show_alert=True)
+            return
+        if chat_id and message_id and delete_message(chat_id, message_id):
+            answer_callback_query(cq_id, "🗑️ Deleted")
+        else:
+            answer_callback_query(cq_id, "⚠️ Couldn't delete \\(bot may lack permission here\\)", show_alert=True)
+        return
+
+    if data == "lb_delete":
+        # Same rule as the token-card Delete button: only whoever triggered
+        # the /leaderboard (or /lb) command can remove it — our leaderboard
+        # message is always sent as a reply to that command.
         requester_id = ((message.get("reply_to_message") or {}).get("from") or {}).get("id")
         caller_id = (callback_query.get("from") or {}).get("id")
         if requester_id and caller_id != requester_id:
