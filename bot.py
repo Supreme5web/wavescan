@@ -1,4 +1,5 @@
 import os
+import secrets
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -7,10 +8,10 @@ import pnl_card
 import pnl_lookup
 import solana
 import storage
-from config import BOT_NAME, BOT_USERNAME, TRADING_BOTS
+from config import BOT_NAME, BOT_USERNAME, PUBLIC_BASE_URL, TRADING_BOTS
 from market import fetch_best_pair, get_ath_mc, get_market_cap
 from telegram import (
-    send_message, send_photo, send_photo_file, delete_message, answer_callback_query,
+    send_message, send_photo_file, delete_message, answer_callback_query,
     edit_message_text, edit_message_caption,
 )
 from utils import (
@@ -52,6 +53,15 @@ def _action_keyboard(ca: str):
         {"text": "🔄 Refresh", "callback_data": f"refresh:{ca}"},
         {"text": "🗑️ Delete", "callback_data": "delete"},
     ]]}
+
+
+def _card_url(ca: str) -> str:
+    """Fresh URL per render, pointing at the /card/<ca>/<nonce> page in
+    app.py. The random nonce means Telegram's link-preview scraper always
+    treats it as a URL it's never seen, so it never serves a stale cache
+    from an earlier render of the same token."""
+    nonce = secrets.token_hex(6)
+    return f"{PUBLIC_BASE_URL}/card/{ca}/{nonce}"
 
 
 def _social_links_line(pair: dict) -> str:
@@ -195,11 +205,11 @@ def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
 
     caption = _build_token_message(pair, ca, chat_id)
     keyboard = _action_keyboard(ca)
-    image_url = (pair.get("info") or {}).get("imageUrl")
 
-    if image_url and send_photo(chat_id, image_url, caption, message_id, keyboard):
-        return
-    send_message(chat_id, caption, message_id, keyboard)
+    # Server-rendered overlay, embedded as a link preview (see app.py's
+    # /card/<ca>/<nonce> route + token_card.py) rather than uploaded via
+    # sendPhoto.
+    send_message(chat_id, caption, message_id, keyboard, preview_url=_card_url(ca))
 
 
 def handle_alert(chat_id, text, message_id, user):
@@ -449,10 +459,15 @@ def handle_callback(callback_query: dict):
     keyboard = _action_keyboard(ca)
     has_photo = bool(message.get("photo"))
 
+    # has_photo means this card predates the link-preview switch (it was
+    # sent via sendPhoto) — its caption can still be edited in place, but
+    # it can't retroactively become a link-preview message. New cards are
+    # plain text with a link preview, refreshed to a fresh nonce each time
+    # so Telegram rescrapes rather than reusing a stale image.
     result = (
         edit_message_caption(chat_id, message_id, caption, keyboard)
         if has_photo else
-        edit_message_text(chat_id, message_id, caption, keyboard)
+        edit_message_text(chat_id, message_id, caption, keyboard, preview_url=_card_url(ca))
     )
 
     if result is None:

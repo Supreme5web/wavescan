@@ -8,6 +8,16 @@ BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "WaveScanBot")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
+# Public base URL for this deployment. Used to build the /card/<ca>/<nonce>
+# link-preview page that Telegram scrapes for the token overlay image (see
+# app.py + token_card.py). Render sets RENDER_EXTERNAL_URL automatically;
+# set PUBLIC_BASE_URL explicitly if you're hosting elsewhere.
+PUBLIC_BASE_URL = (
+    os.environ.get("PUBLIC_BASE_URL")
+    or os.environ.get("RENDER_EXTERNAL_URL")
+    or "http://localhost:5000"
+).rstrip("/")
+
 # Optional: set CRON_SECRET so the sweep can't be triggered by strangers if
 # you ever expose it over HTTP instead of running it as a Render Cron Job.
 CRON_SECRET = os.environ.get("CRON_SECRET")

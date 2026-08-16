@@ -4,13 +4,23 @@ from config import TELEGRAM_API
 from utils import escape_md  # re-exported for convenience
 
 
-def send_message(chat_id, text, reply_to=None, keyboard=None):
+def send_message(chat_id, text, reply_to=None, keyboard=None, preview_url=None):
+    """preview_url, if given, is scraped by Telegram for a link-preview
+    embed (see app.py's /card/<ca>/<nonce> route) instead of appearing as
+    a visible link — the message text itself is unaffected."""
     payload = {
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "MarkdownV2",
-        "disable_web_page_preview": True,
     }
+    if preview_url:
+        payload["link_preview_options"] = {
+            "url": preview_url,
+            "prefer_large_media": True,
+            "show_above_text": True,
+        }
+    else:
+        payload["disable_web_page_preview"] = True
     if reply_to:
         payload["reply_to_message_id"] = reply_to
         payload["allow_sending_without_reply"] = True
@@ -112,16 +122,25 @@ def answer_callback_query(callback_query_id, text=None, show_alert=False):
         print("answerCallbackQuery failed:", err)
 
 
-def edit_message_text(chat_id, message_id, text, keyboard=None):
+def edit_message_text(chat_id, message_id, text, keyboard=None, preview_url=None):
     """Edit a plain-text message in place (used by the Refresh button).
+    Pass a fresh preview_url each time (see send_message) so Telegram
+    rescrapes rather than reusing whatever it cached for the old URL.
     Returns True on success, None if Telegram says nothing changed, False on failure."""
     payload = {
         "chat_id": chat_id,
         "message_id": message_id,
         "text": text,
         "parse_mode": "MarkdownV2",
-        "disable_web_page_preview": True,
     }
+    if preview_url:
+        payload["link_preview_options"] = {
+            "url": preview_url,
+            "prefer_large_media": True,
+            "show_above_text": True,
+        }
+    else:
+        payload["disable_web_page_preview"] = True
     if keyboard:
         payload["reply_markup"] = keyboard
     try:
