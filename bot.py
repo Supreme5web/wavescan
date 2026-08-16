@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -35,6 +36,18 @@ Commands:
 """.strip()
 
 _SOCIAL_EMOJI = {"twitter": "🐦", "telegram": "✈️", "discord": "🎮"}
+
+
+def _format_count_short(n) -> str:
+    """147390 -> '147.39K', matching format_usd_short's scale but with no $."""
+    n = float(n or 0)
+    if n >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.2f}B"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.2f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.2f}K"
+    return f"{n:.0f}"
 
 
 def _jump_link(chat_id, message_id):
@@ -112,19 +125,25 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     sells1h = int(txns1h.get("sells") or 0)
     created_ms = pair.get("pairCreatedAt") or 0
     dex = str(pair.get("dexId") or "Unknown").replace("-", " ").title()
+    dex = re.sub(r"\s+Amm$", "", dex, flags=re.I)  # "Pumpfun Amm" -> "Pumpfun"
     holders = int(pair.get("holders") or 0)
     dev_pct = float(pair.get("devPercentage") or 0)
     dev_wallet = pair.get("devWallet") or ""
     dex_paid = bool(pair.get("dexPaid"))
+    sniper_count = int(pair.get("sniperCount") or 0)
+    sniper_pct = float(pair.get("sniperPercentage") or 0)
+    fees_sol = pair.get("feesSol")
     th, top10_total = _fmt_top_holders(ca, pair.get("chainId"))
 
     age = format_age(created_ms)
     if age == "0m":
         age = "<1m"
+    age = re.sub(r"\s*days?\b", "d", age, flags=re.I)  # "60 days" -> "60d"
 
     dev_status = "Hold 🚫" if dev_pct > 0 else "Sold✅"
     wallet_short = f"{dev_wallet[:4]}...{dev_wallet[-4:]}" if len(dev_wallet) > 10 else (dev_wallet or "N/A")
     paid_line = "✅ Paid" if dex_paid else "❌ Not Paid"
+    fees_line = f"{fees_sol:.2f} SOL" if fees_sol is not None else "N/A"
     wallet_link = (
         f"[{escape_md(wallet_short)}]({escape_url(f'https://solscan.io/account/{dev_wallet}')})"
         if dev_wallet else escape_md(wallet_short)
@@ -133,21 +152,24 @@ def _build_token_message(pair: dict, ca: str, chat_id=None) -> str:
     lines = [
         f"🍪 *_\\(${escape_md(symbol)}\\) {escape_md(name)} • ⌛{escape_md(age)} • {escape_md(dex)}_*",
         "",
-        f"┏ *_💰 MC {escape_md(format_usd_short(mc))}  \\(ATH {escape_md(format_usd_short(ath_mc))}\\)_*",
-        f"┣ *_💵 Price {escape_md(format_price(price))}_*",
-        f"┣ *_💧 LP {escape_md(format_usd_short(liq))}_*",
-        f"┣ *_📊 Vol {escape_md(format_usd_short(vol24))}_*",
-        f"┣ *_⏱ 1H {escape_md(format_usd_short(vol1h))}_*",
+        f"┏ *_💰 MC  {escape_md(format_usd_short(mc))}  \\(ATH {escape_md(format_usd_short(ath_mc))}\\)_*",
+        f"┣ *_💵 Price  {escape_md(format_price(price))}_*",
+        f"┣ *_💧 LP  {escape_md(format_usd_short(liq))}_*",
+        f"┣ *_📊 Vol  {escape_md(format_usd_short(vol24))}_*",
+        f"┣ *_⏱ 1H  {escape_md(format_usd_short(vol1h))}_*",
+        f"┣ *_👥 Holders  {escape_md(_format_count_short(holders))}_*",
+        f"┣ *_🎯 Snipers  {sniper_count} \\({sniper_pct:.0f}%\\)_*",
         (
-            f"┗ *_🎯 TH {th} \\({top10_total:.0f}%\\)_*"
+            f"┗ *_🎯 TH  {th} \\({top10_total:.0f}%\\)_*"
             if th is not None
-            else "┗ *_🎯 TH N/A_*"
+            else "┗ *_🎯 TH  N/A_*"
         ),
         "",
         "👨‍💻 *_Dev_*",
-        f"┏ *_Status {escape_md(dev_status)}_*",
-        f"┣ *_Wallet {wallet_link}_*",
-        f"┗ *_DEX Paid {escape_md(paid_line)}_*",
+        f"┏ *_Status  {escape_md(dev_status)}_*",
+        f"┣ *_Wallet  {wallet_link}_*",
+        f"┣ *_DEX Paid  {escape_md(paid_line)}_*",
+        f"┗ *_Fees  {escape_md(fees_line)}_*",
     ]
 
     socials_line = _social_links_line(pair)

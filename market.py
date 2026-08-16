@@ -62,9 +62,16 @@ def fetch_best_pair(ca: str):
             or (pool.get("txns") or {}).get("volume24h")
             or 0
         )
+        pool_txns = pool.get("txns") or {}
+        # Solana Tracker pool.txns can show up either flat ("volume1h") or
+        # bucketed per-timeframe ("1h": {"volume": ...}) depending on
+        # endpoint/version, so check both shapes before falling back.
+        tf_1h = pool_txns.get("1h") if isinstance(pool_txns.get("1h"), dict) else {}
         vol1h = float(
             search.get("volume_1h")
-            or (pool.get("txns") or {}).get("volume1h")
+            or pool_txns.get("volume1h")
+            or tf_1h.get("volume")
+            or tf_1h.get("volumeUsd")
             or 0
         )
         buys1h = int(search.get("buys") or 0)
@@ -112,6 +119,30 @@ def fetch_best_pair(ca: str):
             "websites": [],
         }
 
+        snipers = risk.get("snipers") or {}
+        sniper_count = int(snipers.get("count") or 0)
+        sniper_pct = float(snipers.get("totalPercentage") or 0)
+
+        # NOTE: creator/dev fees-earned isn't confirmed in Solana Tracker's
+        # public docs — trying the field names that would fit this payload
+        # shape. Falls back to None (rendered as N/A) if none are present.
+        fees_sol = None
+        for src in (pool, token, risk, data):
+            if not isinstance(src, dict):
+                continue
+            for key in ("creatorFeesSol", "creatorFees", "totalFeesSol", "feesSol", "fees"):
+                val = src.get(key)
+                if isinstance(val, dict):
+                    val = val.get("sol") or val.get("total")
+                if val is not None:
+                    try:
+                        fees_sol = float(val)
+                        break
+                    except (TypeError, ValueError):
+                        continue
+            if fees_sol is not None:
+                break
+
         return {
             "chainId": "solana",
             "baseToken": {
@@ -137,6 +168,9 @@ def fetch_best_pair(ca: str):
             "devPercentage": float((risk.get("dev") or {}).get("percentage") or search.get("dev") or 0),
             "devWallet": creation.get("creator") or search.get("deployer") or pool.get("deployer"),
             "dexPaid": bool(search.get("dexPaid") or data.get("dexPaid")),
+            "sniperCount": sniper_count,
+            "sniperPercentage": sniper_pct,
+            "feesSol": fees_sol,
         }
     except requests.HTTPError as err:
         print(f"Solana Tracker token lookup failed: {err}")
