@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 
+import dexscreener
 import leaderboard
 import storage
 from config import TRADING_BOTS
@@ -119,6 +120,57 @@ def _sweep_leaderboard():
         leaderboard.update_best(chat_id, ca, mc)
 
     return {"lb_checked": checked}
+
+
+def fast_refresh_ath():
+    """Lightweight ATH (best_mc) ratchet, meant to run every ~10s from a
+    background thread (see app.py) — NOT the full leaderboard sweep.
+
+    Uses Dexscreener instead of Solana Tracker because it's cheap/fast
+    enough to poll this often, and skips the Solana Tracker /ath lookup
+    that `_sweep_leaderboard` does on the slower cron-driven cycle, so this
+    stays fast. This is what keeps /pnl accurate even if nobody has re-run
+    /data since the token was first called.
+
+    IMPORTANT: this also has to own the 2x-crossing alert. Since this loop
+    ratchets best_mc every 10s, by the time the slower `/sweep` cron runs
+    best_mc is usually already past 2x, so its own crossing check
+    (old_mult < 2 and new_mult >= 2) would never fire — this loop sees the
+    crossing first, so it has to be the one to send it.
+    """
+    if not leaderboard.available():
+        return {"fast_checked": 0}
+
+    targets = leaderboard.distinct_targets()
+    if not targets:
+        return {"fast_checked": 0}
+
+    mc_cache = {}
+    checked = 0
+    for chat_id, ca in targets:
+        checked += 1
+        if ca not in mc_cache:
+            mc_cache[ca] = dexscreener.fetch_market_cap(ca)
+        mc = mc_cache[ca]
+        if not mc:
+            continue
+
+        for row in leaderboard.calls_for_target(chat_id, ca):
+            entry_mc = float(row.get("entry_mc") or 0)
+            if not entry_mc:
+                continue
+            old_mult = float(row.get("best_mc") or 0) / entry_mc
+            new_mult = mc / entry_mc
+            if new_mult >= 2 and old_mult < 2:
+                symbol = row.get("symbol") or "UNKNOWN"
+                try:
+                    _send_2x_alert(chat_id, row, symbol, new_mult)
+                except Exception as err:
+                    print(f"2x alert failed for chat={chat_id} ca={ca}:", err)
+
+        leaderboard.update_best(chat_id, ca, mc)
+
+    return {"fast_checked": checked}
 
 
 def run():

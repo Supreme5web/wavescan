@@ -1,4 +1,6 @@
 import os
+import threading
+import time
 
 from flask import Flask, request, jsonify
 
@@ -7,6 +9,42 @@ import sweep
 from config import BOT_NAME, CRON_SECRET
 
 app = Flask(__name__)
+
+# --- Background ATH refresher --------------------------------------------
+# Runs sweep.fast_refresh_ath() (Dexscreener-based) every 10s so best_mc is
+# already fresh in Supabase by the time /pnl reads it — fixes /pnl showing
+# entry == best when nobody ran /data (which was the only other place that
+# ratcheted best_mc on demand) since the token was first called.
+#
+# Caveat: if this is deployed with gunicorn -w N (N>1), each worker process
+# starts its own copy of this loop. That's wasted duplicate Dexscreener
+# calls, not a correctness bug (update_best only ratchets upward), but for
+# a webhook bot like this you should run a single worker anyway
+# (`gunicorn -w 1 app:app`) so Telegram updates aren't duplicated either.
+_REFRESH_INTERVAL_SECONDS = 10
+_refresher_started = False
+
+
+def _background_refresh_loop():
+    while True:
+        try:
+            sweep.fast_refresh_ath()
+        except Exception as err:
+            print("fast ATH refresh failed:", err)
+        time.sleep(_REFRESH_INTERVAL_SECONDS)
+
+
+def start_background_refresher():
+    global _refresher_started
+    if _refresher_started:
+        return
+    _refresher_started = True
+    t = threading.Thread(target=_background_refresh_loop, daemon=True)
+    t.start()
+    print(f"Background ATH refresher started ({_REFRESH_INTERVAL_SECONDS}s interval, Dexscreener)")
+
+
+start_background_refresher()
 
 
 @app.get("/")
