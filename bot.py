@@ -3,6 +3,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
+import ath_tracker
 import dexscreener
 import leaderboard
 import pnl_card
@@ -118,7 +119,13 @@ def _build_token_message(
     name = base.get("name") or symbol
     price = float(pair.get("priceUsd") or 0)
     mc = get_market_cap(pair)
-    ath_mc = get_ath_mc(pair, mc)
+    # get_ath_mc gives a floor (Solana Tracker /ath + pool highs); ath_tracker
+    # ratchets our own record on top of that and remembers when it was hit,
+    # since neither Solana Tracker's /ath response nor Dexscreener exposes a
+    # confirmed timestamp field for the peak.
+    floor_ath = get_ath_mc(pair, mc)
+    ath_mc, ath_at_ms = ath_tracker.record_and_get(ca, floor_ath)
+    ath_age = format_age(ath_at_ms) if ath_at_ms else None
     liq = float((pair.get("liquidity") or {}).get("usd") or 0)
     vol24 = float((pair.get("volume") or {}).get("h24") or 0)
     vol1h = float((pair.get("volume") or {}).get("h1") or 0)
@@ -162,10 +169,17 @@ def _build_token_message(
         dev_lines.append(f"┣ *_CTO  {escape_md('✅ Approved')}_*")
     dev_lines.append(f"┗ *_Fees  {escape_md(fees_line)}_*")
 
+    ath_line = (
+        f"┣ *_💸 ATH  {escape_md(format_usd_short(ath_mc))} \\({escape_md(ath_age)}\\)_*"
+        if ath_age
+        else f"┣ *_💸 ATH  {escape_md(format_usd_short(ath_mc))}_*"
+    )
+
     lines = [
         f"🍪 *_\\(${escape_md(symbol)}\\) {escape_md(name)} • ⌛{escape_md(age)} • {escape_md(dex)}_*",
         "",
-        f"┏ *_💰 MC {escape_md(format_usd_short(mc))} \\(ATH {escape_md(format_usd_short(ath_mc))}\\)_*",
+        f"┏ *_💰 MC  {escape_md(format_usd_short(mc))}_*",
+        ath_line,
         f"┣ *_💵 Price  {escape_md(format_price(price))}_*",
         f"┣ *_💧 LP  {escape_md(format_usd_short(liq))}_*",
         f"┣ *_📊 Vol  {escape_md(format_usd_short(vol24))}_*",
@@ -337,9 +351,11 @@ def handle_cancel(chat_id, text, message_id, user):
 
 
 def _mention_row(row: dict) -> str:
+    """Embedded link showing just the plain name (no leading @) — Telegram
+    still makes it tappable, it just doesn't clutter the line with @."""
     username = row.get("username")
     if username:
-        return f"[@{escape_md(username)}](https://t.me/{username})"
+        return f"[{escape_md(username)}](https://t.me/{username})"
     label = escape_md(row.get("first_name") or "trader")
     user_id = row.get("user_id") or row.get("userId")
     if user_id:
@@ -388,19 +404,25 @@ def _build_leaderboard_message(chat_id, period: str) -> str:
         f"└ 🥇 {_mention_row(top_row)}",
         "",
         "📊 *GROUP PERFORMANCE*",
-        f"├ ⏱️ Period · {escape_md(period)}",
-        f"├ 📞 Calls · {total}",
-        f"├ 🎯 Hit Rate · {hit_rate:.0f}% ≥2x",
-        f"└ 💰 Return · {escape_md(f'{top_mult:.1f}x')} · Avg {escape_md(f'{avg_mult:.1f}x')}",
+        f"├ ⏱️ Period · *{escape_md(period)}*",
+        f"├ 📞 Calls · *{total}*",
+        f"├ 🎯 Hit Rate · *{hit_rate:.0f}%* ≥2x",
+        f"└ 💰 Return · *{escape_md(f'{top_mult:.1f}x')}* · Avg *{escape_md(f'{avg_mult:.1f}x')}*",
         "",
-        "🔥 *TOP CALLS*",
     ]
+
+    # Blockquote: every line of the quoted block needs a leading '>' (raw,
+    # unescaped — this is Telegram's blockquote marker, not a literal '>'
+    # so it must NOT go through escape_md).
+    top_calls_block = ["🔥 *TOP CALLS*"]
     for i, (mult, row) in enumerate(top10):
         prefix = "└" if i == len(top10) - 1 else "├"
         symbol = row.get("symbol") or "UNKNOWN"
-        lines.append(
+        top_calls_block.append(
             f"{prefix} 🟣 {escape_md(symbol)} » {_mention_row(row)} •\\({escape_md(f'{mult:.1f}x')}\\)"
         )
+    lines += [f">{line}" for line in top_calls_block]
+
     return "\n".join(lines)
 
 

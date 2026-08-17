@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 
+import ath_tracker
 import dexscreener
 import leaderboard
 import storage
@@ -154,6 +155,7 @@ def fast_refresh_ath():
         mc = mc_cache[ca]
         if not mc:
             continue
+        ath_tracker.record_and_get(ca, mc)
 
         for row in leaderboard.calls_for_target(chat_id, ca):
             entry_mc = float(row.get("entry_mc") or 0)
