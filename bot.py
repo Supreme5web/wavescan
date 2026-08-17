@@ -418,8 +418,9 @@ def _build_leaderboard_message(chat_id, period: str) -> str:
     for i, (mult, row) in enumerate(top10):
         prefix = "└" if i == len(top10) - 1 else "├"
         symbol = row.get("symbol") or "UNKNOWN"
+        dot = "🟩" if mult >= 2 else "🟥"
         top_calls_block.append(
-            f"{prefix} 🟣 {escape_md(symbol)} » {_mention_row(row)} •\\({escape_md(f'{mult:.1f}x')}\\)"
+            f"{prefix} {dot} {escape_md(symbol)} » {_mention_row(row)} •\\({escape_md(f'{mult:.1f}x')}\\)"
         )
     lines += [f">{line}" for line in top_calls_block]
 
