@@ -126,6 +126,8 @@ def _build_token_message(
     floor_ath = get_ath_mc(pair, mc)
     ath_mc, ath_at_ms = ath_tracker.record_and_get(ca, floor_ath)
     ath_age = format_age(ath_at_ms) if ath_at_ms else None
+    if ath_age == "0m":
+        ath_age = "<1m"
     liq = float((pair.get("liquidity") or {}).get("usd") or 0)
     vol24 = float((pair.get("volume") or {}).get("h24") or 0)
     vol1h = float((pair.get("volume") or {}).get("h1") or 0)
