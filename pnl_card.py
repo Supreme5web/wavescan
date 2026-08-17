@@ -1,7 +1,7 @@
 """
 pnl_card.py
 -----------
-PNL card renderer for the "SYSTEM OVERRIDE" WaveScan layout (1672x941).
+PNL card renderer for the "SYSTEM OVERRIDE" WaveScan layout (1536x864).
 
 Put the new blank template image at:
     assets/pnl_card_template.png
@@ -57,40 +57,40 @@ ACCENT = (239, 68, 68, 255)
 # Layout of the new 1672 x 941 "SYSTEM OVERRIDE" template.
 # Measured directly off the supplied template/example images. The two
 # content boxes on the template live at roughly:
-#   top box:    x 88-805,  y 320-613   (multiplier panel)
-#   bottom box: x 88-1005, y 686-858   (called-at / reached / called-by)
+#   top box:    x 80-740,  y 295-575   (multiplier panel)
+#   bottom box: x 80-975, y 650-790   (called-at / reached / called-by)
 # Everything below is kept safely inside those bounds so nothing spills
 # onto the border art or the character artwork on the right.
 # ---------------------------------------------------------------------------
 
 # Header (logo + name sit above the top box, same as the reference image)
-LOGO_BOX = (80, 78, 280, 278)  # 200px circle
+LOGO_BOX = (70, 72, 272, 274)  # 200px circle
 
-NAME_X = 322
-NAME_Y = 118
-NAME_MAX_WIDTH = 460
+NAME_X = 300
+NAME_Y = 112
+NAME_MAX_WIDTH = 430
 
-SYMBOL_X = 322
-SYMBOL_Y = 205
-SYMBOL_MAX_WIDTH = 460
+SYMBOL_X = 300
+SYMBOL_Y = 190
+SYMBOL_MAX_WIDTH = 430
 
 # "CURRENT MULTIPLIER" label + big value, inside the top box
-MULT_LABEL_BAR = (100, 351, 106, 369)  # small accent bar before the label
-MULT_LABEL_X = 116
-MULT_LABEL_Y = 351
+MULT_LABEL_BAR = (95, 322, 101, 339)  # small accent bar before the label
+MULT_LABEL_X = 110
+MULT_LABEL_Y = 322
 
-MULT_VALUE_X = 100
-MULT_VALUE_Y = 390
-MULT_MAX_WIDTH = 675  # keeps the value inside the top box (right edge ~805)
+MULT_VALUE_X = 95
+MULT_VALUE_Y = 360
+MULT_MAX_WIDTH = 620  # keeps the value inside the top box (right edge ~805)
 
 # Bottom metrics row, inside the bottom box
-CALLED_X = 120
-REACHED_X = 465
-CALLED_BY_X = 785
-CALLED_BY_MAX_WIDTH = 200  # keeps the handle inside the bottom box (~1005)
+CALLED_X = 110
+REACHED_X = 425
+CALLED_BY_X = 720
+CALLED_BY_MAX_WIDTH = 185  # keeps the handle inside the bottom box (~1005)
 
-LABEL_Y = 700
-VALUE_Y = 743
+LABEL_Y = 675
+VALUE_Y = 720
 
 # ---------------------------------------------------------------------------
 
@@ -198,7 +198,7 @@ def _draw_logo(draw, overlay, call):
 
 def _draw_glow_text(overlay, xy, text, font, color, blur_radius=12, pad=40):
     """Draw `text` with a soft color glow behind it, without blurring the
-    whole canvas. Older code ran GaussianBlur over the full 1672x941
+    whole canvas. Older code ran GaussianBlur over the full 1536x864
     overlay just to glow a few hundred pixels of text — this crops a
     small patch around the text, blurs only that, then pastes it back.
     That's the single biggest chunk of render time this function had."""
@@ -239,9 +239,9 @@ def generate_pnl_card(call: dict) -> str:
 
     base = Image.open(TEMPLATE_PATH).convert("RGBA")
 
-    if base.size != (1672, 941):
+    if base.size != (1536, 864):
         logger.warning(
-            "pnl_card_template.png is %s; this layout was designed for 1672x941.",
+            "pnl_card_template.png is %s; this layout was designed for 1536x864.",
             base.size,
         )
 
@@ -320,7 +320,7 @@ def generate_pnl_card(call: dict) -> str:
     fd, output_path = tempfile.mkstemp(prefix="pnl_card_", suffix=".png", dir=tempfile.gettempdir())
     os.close(fd)
 
-    # `optimize=True` on a full 1672x941 PNG is the other big chunk of the
+    # `optimize=True` on a full 1536x864 PNG is the other big chunk of the
     # old 10s: PIL's PNG optimizer re-tries multiple filter/compression
     # strategies to squeeze out extra bytes, which is slow and buys almost
     # nothing here since Telegram re-compresses the photo anyway. Dropping
