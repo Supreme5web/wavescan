@@ -1,9 +1,15 @@
 """Solana Tracker market-data adapter used by WaveScan."""
 
+import time
 from datetime import datetime, timezone
 import requests
 
-from config import SOLANATRACKER_API, SOLANATRACKER_API_KEY
+from config import (
+    DEXPAPRIKA_API,
+    DEXPAPRIKA_NETWORKS,
+    SOLANATRACKER_API,
+    SOLANATRACKER_API_KEY,
+)
 from solanatracker import fetch_ath, fetch_token_stats
 
 
@@ -218,5 +224,67 @@ def get_ath_mc(pair: dict, current_mc: float) -> float:
     return max(float(current_mc or 0), float(pair.get("athMc") or 0))
 
 
+# DexPaprika's accepted OHLCV intervals, in seconds — NOTE it's "24h", not
+# "1d"; passing "1d" gets rejected with an error listing the valid values.
+_OHLCV_INTERVALS_SECONDS = [
+    ("1m", 60),
+    ("5m", 300),
+    ("10m", 600),
+    ("15m", 900),
+    ("30m", 1800),
+    ("1h", 3600),
+    ("6h", 21600),
+    ("12h", 43200),
+    ("24h", 86400),
+]
+# Cap how many candles we ask for in one request (no pagination here).
+_MAX_CANDLES = 500
+
+
+def _pick_ohlcv_interval(elapsed_seconds: float) -> str:
+    """Finest granularity whose candle count for the elapsed window stays
+    under _MAX_CANDLES — so a peak check on a call made 20 minutes ago gets
+    1m candles (accurate), while one on a call made weeks ago falls back to
+    daily candles instead of requesting thousands of rows in one call."""
+    for label, secs in _OHLCV_INTERVALS_SECONDS:
+        if elapsed_seconds / secs <= _MAX_CANDLES:
+            return label
+    return _OHLCV_INTERVALS_SECONDS[-1][0]
+
+
 def fetch_peak_price(chain_id: str, pool_address: str, since_ms: int) -> float:
-    return 0.0
+    """Highest `high` price DexPaprika has recorded for this pool since
+    since_ms (epoch ms). Returns 0.0 if the chain has no DexPaprika network
+    mapping (see config.DEXPAPRIKA_NETWORKS), the pool is too new to have
+    any candles yet, or the lookup fails — same fail-soft pattern as the
+    rest of this codebase, so callers can fall back to another source.
+
+    No API key needed — DexPaprika's pool OHLCV endpoint is public.
+    """
+    network = DEXPAPRIKA_NETWORKS.get(chain_id)
+    if not network or not pool_address or not since_ms:
+        return 0.0
+
+    now_ms = int(time.time() * 1000)
+    elapsed_seconds = max((now_ms - since_ms) / 1000, 60)  # floor at 1 min
+    interval = _pick_ohlcv_interval(elapsed_seconds)
+    start = datetime.fromtimestamp(since_ms / 1000, tz=timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+    try:
+        r = requests.get(
+            f"{DEXPAPRIKA_API}/networks/{network}/pools/{pool_address}/ohlcv",
+            params={"start": start, "interval": interval, "limit": _MAX_CANDLES},
+            timeout=8,
+        )
+        if not r.ok:
+            print(f"DexPaprika OHLCV rejected: status={r.status_code} body={r.text[:300]!r}")
+            return 0.0
+        candles = r.json() or []
+        if not candles:
+            return 0.0
+        return max(float(c.get("high") or 0) for c in candles)
+    except Exception as err:
+        print(f"DexPaprika OHLCV peak-price lookup failed for {pool_address}: {err}")
+        return 0.0
