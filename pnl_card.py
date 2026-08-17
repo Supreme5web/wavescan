@@ -1,14 +1,20 @@
 """
 pnl_card.py
 -----------
-PNL card renderer for the new 1672x941 WaveScan-style layout.
+PNL card renderer for the "SYSTEM OVERRIDE" WaveScan layout (1672x941).
 
-Put the supplied layout image in:
+Put the new blank template image at:
     assets/pnl_card_template.png
 
-The template is the 1672x941 image supplied with the UI.  This renderer
-removes the example token/logo/metrics from that template, preserves the
-UI artwork (including the multiplier box), and then draws live values.
+Unlike the previous version, this template ships CLEAN — no example
+token/logo/metrics baked into it — so this renderer no longer paints
+any masking rectangles over the artwork before drawing. That's what was
+causing the "weird background" patches: the old template had example
+content burned in, so parts of it had to be painted over with solid
+dark rectangles before the real values were drawn on top. Those
+clean-up rectangles didn't line up with this template's box borders and
+ate into the character artwork on the right. With a blank template we
+just draw straight onto it.
 
 Expected call dict:
     token_name
@@ -43,32 +49,48 @@ WHITE = (255, 255, 255, 255)
 GRAY = (148, 168, 200, 255)
 GREEN = (52, 211, 153, 255)
 RED = (248, 113, 113, 255)
-CYAN = (56, 189, 248, 255)
+# Accent used for labels / bullet marks / the small icons row — this
+# template's theme color is red, not the old cyan.
+ACCENT = (239, 68, 68, 255)
 
 # ---------------------------------------------------------------------------
-# Layout of the supplied 1672 x 941 image
+# Layout of the new 1672 x 941 "SYSTEM OVERRIDE" template.
+# Measured directly off the supplied template/example images. The two
+# content boxes on the template live at roughly:
+#   top box:    x 88-805,  y 320-613   (multiplier panel)
+#   bottom box: x 88-1005, y 686-858   (called-at / reached / called-by)
+# Everything below is kept safely inside those bounds so nothing spills
+# onto the border art or the character artwork on the right.
 # ---------------------------------------------------------------------------
 
-# Header
-LOGO_BOX = (68, 80, 308, 308)
+# Header (logo + name sit above the top box, same as the reference image)
+LOGO_BOX = (80, 78, 280, 278)  # 200px circle
+
 NAME_X = 322
-NAME_Y = 181
-NAME_MAX_WIDTH = 820
+NAME_Y = 118
+NAME_MAX_WIDTH = 460
 
-# Multiplier box.  The box itself is already part of the artwork.
-MULT_BOX = (440, 337, 1200, 596)
+SYMBOL_X = 322
+SYMBOL_Y = 205
+SYMBOL_MAX_WIDTH = 460
 
-# Bottom metrics
-CALLED_X = 294
-REACHED_X = 654
-CALLED_BY_X = 1077
+# "CURRENT MULTIPLIER" label + big value, inside the top box
+MULT_LABEL_BAR = (100, 351, 106, 369)  # small accent bar before the label
+MULT_LABEL_X = 116
+MULT_LABEL_Y = 351
 
-LABEL_Y = 717
-VALUE_Y = 762
+MULT_VALUE_X = 100
+MULT_VALUE_Y = 390
+MULT_MAX_WIDTH = 675  # keeps the value inside the top box (right edge ~805)
 
-# Divider positions in the supplied layout.
-DIVIDER_1_X = 613
-DIVIDER_2_X = 1024
+# Bottom metrics row, inside the bottom box
+CALLED_X = 120
+REACHED_X = 465
+CALLED_BY_X = 785
+CALLED_BY_MAX_WIDTH = 200  # keeps the handle inside the bottom box (~1005)
+
+LABEL_Y = 700
+VALUE_Y = 743
 
 # ---------------------------------------------------------------------------
 
@@ -91,11 +113,11 @@ def _fmt_compact(value) -> str:
 
 
 def _fmt_mult(mult: float) -> str:
+    """Always one decimal place (e.g. 1.5X), except triple digits and up
+    where a decimal doesn't add anything useful (e.g. 143X)."""
     if mult >= 100:
         return f"{mult:,.0f}X"
-    if mult >= 10:
-        return f"{mult:.1f}X"
-    return f"{mult:.2f}X"
+    return f"{mult:.1f}X"
 
 
 def _fit_text(draw, text, font_path, max_width, start_size, min_size=18):
@@ -117,14 +139,16 @@ def _fetch_logo(logo_url: Optional[str], size: int):
         return None
 
     try:
-        response = requests.get(logo_url, timeout=6)
+        # Kept short — this sits directly in the send path, and a slow
+        # logo host shouldn't be able to stall the whole card.
+        response = requests.get(logo_url, timeout=4)
         response.raise_for_status()
         logo = Image.open(io.BytesIO(response.content)).convert("RGBA")
     except Exception as exc:
         logger.warning("Could not fetch token logo from %s: %s", logo_url, exc)
         return None
 
-    logo.thumbnail((size - 12, size - 12), Image.LANCZOS)
+    logo.thumbnail((size - 10, size - 10), Image.LANCZOS)
 
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     x = (size - logo.width) // 2
@@ -140,67 +164,6 @@ def _fetch_logo(logo_url: Optional[str], size: int):
     return result
 
 
-def _remove_example_content(img: Image.Image) -> Image.Image:
-    """
-    Remove the example content baked into the supplied screenshot while
-    retaining the actual UI frame/artwork.
-
-    The template's central multiplier panel and bottom background are mostly
-    black, so these masks are deliberately conservative.
-    """
-    out = img.copy()
-    draw = ImageDraw.Draw(out)
-
-    # 1) Token logo interior.
-    # Keep the cyan circular border, replace only its interior with a dark
-    # transparent-looking fill. The live logo is drawn over this later.
-    x0, y0, x1, y1 = LOGO_BOX
-    draw.ellipse(
-        (x0 + 7, y0 + 7, x1 - 7, y1 - 7),
-        fill=(2, 5, 10, 255),
-    )
-
-    # 2) Example token name.
-    # This is in a relatively dark header region, so paint only the text band.
-    draw.rectangle(
-        (NAME_X - 5, 170, 1130, 252),
-        fill=(1, 4, 9, 255),
-    )
-
-    # Restore the subtle header glow/circuit area from a nearby dark band by
-    # keeping the cleanup conservative; the live title is drawn afterward.
-
-    # 3) Example multiplier text ONLY.
-    # Preserve the neon box and border; clear the interior text area.
-    mx0, my0, mx1, my1 = MULT_BOX
-    draw.rectangle(
-        (mx0 + 65, my0 + 35, mx1 - 65, my1 - 35),
-        fill=(1, 5, 10, 255),
-    )
-
-    # 4) Bottom example metrics.
-    # The supplied layout has a very dark lower band, so remove the example
-    # labels/values without touching the outer border.
-    draw.rectangle(
-        (255, 704, 1505, 865),
-        fill=(1, 4, 9, 255),
-    )
-
-    # Recreate the two cyan separators from the supplied layout.
-    draw.line(
-        (DIVIDER_1_X, 717, DIVIDER_1_X, 853),
-        fill=(56, 189, 248, 180),
-        width=2,
-    )
-    draw.line(
-        (DIVIDER_2_X, 717, DIVIDER_2_X, 853),
-        fill=(56, 189, 248, 180),
-        width=2,
-    )
-
-    return out
-
-
 def _draw_logo(draw, overlay, call):
     x0, y0, x1, y1 = LOGO_BOX
     size = x1 - x0
@@ -209,23 +172,14 @@ def _draw_logo(draw, overlay, call):
 
     if logo:
         overlay.alpha_composite(logo, (x0, y0))
-        draw.ellipse(
-            LOGO_BOX,
-            outline=CYAN,
-            width=4,
-        )
+        draw.ellipse(LOGO_BOX, outline=ACCENT, width=3)
         return
 
     # Fallback placeholder.
-    draw.ellipse(
-        LOGO_BOX,
-        fill=(8, 15, 27, 255),
-        outline=CYAN,
-        width=4,
-    )
+    draw.ellipse(LOGO_BOX, fill=(8, 15, 27, 255), outline=ACCENT, width=3)
 
     symbol = str(call.get("token_symbol") or "?")[0].upper()
-    font = _font(FONT_BOLD, 112)
+    font = _font(FONT_BOLD, 92)
 
     bbox = draw.textbbox((0, 0), symbol, font=font)
     w = bbox[2] - bbox[0]
@@ -242,16 +196,45 @@ def _draw_logo(draw, overlay, call):
     )
 
 
+def _draw_glow_text(overlay, xy, text, font, color, blur_radius=12, pad=40):
+    """Draw `text` with a soft color glow behind it, without blurring the
+    whole canvas. Older code ran GaussianBlur over the full 1672x941
+    overlay just to glow a few hundred pixels of text — this crops a
+    small patch around the text, blurs only that, then pastes it back.
+    That's the single biggest chunk of render time this function had."""
+    x, y = xy
+    draw = ImageDraw.Draw(overlay)
+    bbox = draw.textbbox((x, y), text, font=font)
+
+    patch_box = (
+        max(0, int(bbox[0] - pad)),
+        max(0, int(bbox[1] - pad)),
+        min(overlay.width, int(bbox[2] + pad)),
+        min(overlay.height, int(bbox[3] + pad)),
+    )
+
+    glow_patch = Image.new("RGBA", (patch_box[2] - patch_box[0], patch_box[3] - patch_box[1]), (0, 0, 0, 0))
+    glow_draw = ImageDraw.Draw(glow_patch)
+    glow_draw.text((x - patch_box[0], y - patch_box[1]), text, font=font, fill=(*color[:3], 120))
+    glow_patch = glow_patch.filter(ImageFilter.GaussianBlur(blur_radius))
+
+    overlay.alpha_composite(glow_patch, (patch_box[0], patch_box[1]))
+
+    draw = ImageDraw.Draw(overlay)
+    draw.text((x, y), text, font=font, fill=color)
+
+
 def generate_pnl_card(call: dict) -> str:
     """
-    Render the supplied UI layout with live call data and return a temporary
-    PNG path. The caller is responsible for deleting the returned file.
+    Render the SYSTEM OVERRIDE template with live call data and return a
+    temporary PNG path. The caller is responsible for deleting the
+    returned file.
     """
 
     if not os.path.isfile(TEMPLATE_PATH):
         raise FileNotFoundError(
             f"PNL template not found: {TEMPLATE_PATH}. "
-            "Put the supplied UI image at assets/pnl_card_template.png"
+            "Put the new template image at assets/pnl_card_template.png"
         )
 
     base = Image.open(TEMPLATE_PATH).convert("RGBA")
@@ -262,10 +245,9 @@ def generate_pnl_card(call: dict) -> str:
             base.size,
         )
 
-    # Remove the example data baked into the supplied image.
-    cleaned = _remove_example_content(base)
-
-    overlay = Image.new("RGBA", cleaned.size, (0, 0, 0, 0))
+    # Template ships blank, so we draw straight onto a copy of it — no
+    # masking rectangles needed.
+    overlay = base.copy()
     draw = ImageDraw.Draw(overlay)
 
     entry_mc = float(call["entry_mc"])
@@ -281,165 +263,69 @@ def generate_pnl_card(call: dict) -> str:
     draw = ImageDraw.Draw(overlay)
 
     # -----------------------------------------------------------------------
-    # Token name / symbol
+    # Token name / symbol (two lines, matching the new template)
     # -----------------------------------------------------------------------
     name = str(call.get("token_name") or "Unknown Token")
-    symbol = str(call.get("token_symbol") or "").upper()
+    symbol = str(call.get("token_symbol") or "")
 
-    name_text = f"{name} (${symbol})" if symbol else name
+    name_font = _fit_text(draw, name, FONT_BOLD, NAME_MAX_WIDTH, 62, min_size=28)
+    draw.text((NAME_X, NAME_Y), name, font=name_font, fill=WHITE)
 
-    name_font = _fit_text(
-        draw,
-        name_text,
-        FONT_BOLD,
-        NAME_MAX_WIDTH,
-        58,
-        min_size=28,
-    )
-
-    draw.text(
-        (NAME_X, NAME_Y),
-        name_text,
-        font=name_font,
-        fill=WHITE,
-    )
+    if symbol:
+        symbol_text = f"${symbol.upper()}"
+        symbol_font = _fit_text(draw, symbol_text, FONT_REGULAR, SYMBOL_MAX_WIDTH, 38, min_size=20)
+        draw.text((SYMBOL_X, SYMBOL_Y), symbol_text, font=symbol_font, fill=GRAY)
 
     # -----------------------------------------------------------------------
-    # Multiplier
+    # "CURRENT MULTIPLIER" label + value
     # -----------------------------------------------------------------------
+    draw.rectangle(MULT_LABEL_BAR, fill=ACCENT)
+    label_font = _font(FONT_BOLD, 26)
+    draw.text((MULT_LABEL_X, MULT_LABEL_Y), "CURRENT MULTIPLIER", font=label_font, fill=ACCENT)
+
     mult_text = _fmt_mult(mult)
+    mult_font = _fit_text(draw, mult_text, FONT_BOLD, MULT_MAX_WIDTH, 150, min_size=70)
 
-    mult_width = MULT_BOX[2] - MULT_BOX[0] - 90
-
-    mult_font = _fit_text(
-        draw,
-        mult_text,
-        FONT_BOLD,
-        mult_width,
-        150,
-        min_size=70,
-    )
-
-    bbox = draw.textbbox(
-        (0, 0),
-        mult_text,
-        font=mult_font,
-    )
-
-    mw = bbox[2] - bbox[0]
-    mh = bbox[3] - bbox[1]
-
-    center_x = (MULT_BOX[0] + MULT_BOX[2]) / 2
-    center_y = (MULT_BOX[1] + MULT_BOX[3]) / 2
-
-    mx = center_x - mw / 2 - bbox[0]
-    my = center_y - mh / 2 - bbox[1]
-
-    # Green/red glow.
-    glow = Image.new("RGBA", overlay.size, (0, 0, 0, 0))
-    glow_draw = ImageDraw.Draw(glow)
-
-    glow_draw.text(
-        (mx, my),
-        mult_text,
-        font=mult_font,
-        fill=(*accent[:3], 120),
-    )
-
-    glow = glow.filter(ImageFilter.GaussianBlur(12))
-    overlay.alpha_composite(glow)
-
+    _draw_glow_text(overlay, (MULT_VALUE_X, MULT_VALUE_Y), mult_text, mult_font, accent)
     draw = ImageDraw.Draw(overlay)
-
-    draw.text(
-        (mx, my),
-        mult_text,
-        font=mult_font,
-        fill=accent,
-    )
 
     # -----------------------------------------------------------------------
     # Bottom metrics
     # -----------------------------------------------------------------------
-    label_font = _font(FONT_BOLD, 28)
-    value_font = _font(FONT_BOLD, 58)
+    label_font = _font(FONT_BOLD, 24)
+    value_font = _font(FONT_BOLD, 54)
 
-    draw.text(
-        (CALLED_X, LABEL_Y),
-        "CALLED AT",
-        font=label_font,
-        fill=CYAN,
-    )
+    draw.text((CALLED_X, LABEL_Y), "CALLED AT", font=label_font, fill=ACCENT)
+    draw.text((CALLED_X, VALUE_Y), _fmt_compact(entry_mc), font=value_font, fill=WHITE)
 
-    draw.text(
-        (CALLED_X, VALUE_Y),
-        _fmt_compact(entry_mc),
-        font=value_font,
-        fill=WHITE,
-    )
+    draw.text((REACHED_X, LABEL_Y), "REACHED", font=label_font, fill=ACCENT)
+    draw.text((REACHED_X, VALUE_Y), _fmt_compact(best_mc), font=value_font, fill=accent)
 
-    draw.text(
-        (REACHED_X, LABEL_Y),
-        "REACHED",
-        font=label_font,
-        fill=CYAN,
-    )
-
-    draw.text(
-        (REACHED_X, VALUE_Y),
-        _fmt_compact(best_mc),
-        font=value_font,
-        fill=accent,
-    )
-
-    # -----------------------------------------------------------------------
-    # Called by
-    # -----------------------------------------------------------------------
     username = call.get("username")
-
     if username:
         handle = str(username)
         if not handle.startswith("@"):
             handle = "@" + handle
 
-        draw.text(
-            (CALLED_BY_X, LABEL_Y),
-            "CALLED BY",
-            font=label_font,
-            fill=CYAN,
-        )
+        draw.text((CALLED_BY_X, LABEL_Y), "CALLED BY", font=label_font, fill=ACCENT)
 
-        handle_font = _fit_text(
-            draw,
-            handle,
-            FONT_BOLD,
-            430,
-            58,
-            min_size=30,
-        )
-
-        draw.text(
-            (CALLED_BY_X, VALUE_Y),
-            handle,
-            font=handle_font,
-            fill=WHITE,
-        )
+        handle_font = _fit_text(draw, handle, FONT_BOLD, CALLED_BY_MAX_WIDTH, 54, min_size=26)
+        draw.text((CALLED_BY_X, VALUE_Y), handle, font=handle_font, fill=WHITE)
 
     # -----------------------------------------------------------------------
     # Composite and save.
     # -----------------------------------------------------------------------
-    final_img = Image.alpha_composite(
-        cleaned,
-        overlay,
-    ).convert("RGB")
+    final_img = overlay.convert("RGB")
 
-    fd, output_path = tempfile.mkstemp(
-        prefix="pnl_card_",
-        suffix=".png",
-        dir=tempfile.gettempdir(),
-    )
+    fd, output_path = tempfile.mkstemp(prefix="pnl_card_", suffix=".png", dir=tempfile.gettempdir())
     os.close(fd)
 
-    final_img.save(output_path, "PNG", optimize=True)
+    # `optimize=True` on a full 1672x941 PNG is the other big chunk of the
+    # old 10s: PIL's PNG optimizer re-tries multiple filter/compression
+    # strategies to squeeze out extra bytes, which is slow and buys almost
+    # nothing here since Telegram re-compresses the photo anyway. Dropping
+    # it (and using a fast compress level) cuts save time substantially
+    # with no visible quality difference.
+    final_img.save(output_path, "PNG", optimize=False, compress_level=1)
 
     return output_path
