@@ -2,7 +2,6 @@
 
 from collections import defaultdict
 
-import ath_tracker
 import dexscreener
 import leaderboard
 import storage
@@ -124,14 +123,15 @@ def _sweep_leaderboard():
 
 
 def fast_refresh_ath():
-    """Lightweight ATH (best_mc) ratchet, meant to run every ~10s from a
-    background thread (see app.py) — NOT the full leaderboard sweep.
+    """Lightweight best_mc (per-caller PNL) ratchet, meant to run every ~10s
+    from a background thread (see app.py) — NOT the full leaderboard sweep.
 
     Uses Dexscreener instead of Solana Tracker because it's cheap/fast
-    enough to poll this often, and skips the Solana Tracker /ath lookup
-    that `_sweep_leaderboard` does on the slower cron-driven cycle, so this
-    stays fast. This is what keeps /pnl accurate even if nobody has re-run
-    /data since the token was first called.
+    enough to poll this often, so this stays fast. This is what keeps
+    /pnl accurate even if nobody has re-run /data since the token was
+    first called. (The card's *token* ATH display is a separate concern,
+    handled in bot.py via market.fetch_ath_from_ohlcv — real historical
+    candles, not this loop.)
 
     IMPORTANT: this also has to own the 2x-crossing alert. Since this loop
     ratchets best_mc every 10s, by the time the slower `/sweep` cron runs
@@ -155,7 +155,6 @@ def fast_refresh_ath():
         mc = mc_cache[ca]
         if not mc:
             continue
-        ath_tracker.record_and_get(ca, mc)
 
         for row in leaderboard.calls_for_target(chat_id, ca):
             entry_mc = float(row.get("entry_mc") or 0)

@@ -3,7 +3,6 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-import ath_tracker
 import dexscreener
 import leaderboard
 import pnl_card
@@ -11,7 +10,7 @@ import pnl_lookup
 import solana
 import storage
 from config import BOT_NAME, BOT_USERNAME, TRADING_BOTS
-from market import fetch_best_pair, get_ath_mc, get_market_cap
+from market import fetch_ath_from_ohlcv, fetch_best_pair, get_ath_mc, get_market_cap
 from telegram import (
     send_message, send_photo_file, delete_message, answer_callback_query,
     edit_message_text, edit_message_caption,
@@ -119,12 +118,21 @@ def _build_token_message(
     name = base.get("name") or symbol
     price = float(pair.get("priceUsd") or 0)
     mc = get_market_cap(pair)
-    # get_ath_mc gives a floor (Solana Tracker /ath + pool highs); ath_tracker
-    # ratchets our own record on top of that and remembers when it was hit,
-    # since neither Solana Tracker's /ath response nor Dexscreener exposes a
-    # confirmed timestamp field for the peak.
+    # Real ATH + when it happened, read from DexPaprika's historical
+    # candles (see market.fetch_ath_from_ohlcv) rather than inferred from
+    # whenever the bot happened to be polling. get_ath_mc's Solana
+    # Tracker-based figure is kept only as a floor/fallback for when the
+    # chain isn't DexPaprika-mapped or the pool is too new to have candles.
     floor_ath = get_ath_mc(pair, mc)
-    ath_mc, ath_at_ms = ath_tracker.record_and_get(ca, floor_ath)
+    candle_ath_mc, candle_ath_at_ms = fetch_ath_from_ohlcv(
+        pair.get("chainId"), pair.get("pairAddress"), pair.get("pairCreatedAt"), price, mc
+    )
+    if candle_ath_mc > 0:
+        ath_mc = max(candle_ath_mc, floor_ath)
+        ath_at_ms = candle_ath_at_ms
+    else:
+        ath_mc = floor_ath
+        ath_at_ms = 0  # unknown — card shows the value with no age
     ath_age = format_age(ath_at_ms) if ath_at_ms else None
     if ath_age == "0m":
         ath_age = "<1m"

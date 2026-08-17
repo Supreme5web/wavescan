@@ -252,20 +252,23 @@ def _pick_ohlcv_interval(elapsed_seconds: float) -> str:
     return _OHLCV_INTERVALS_SECONDS[-1][0]
 
 
-def fetch_peak_price(chain_id: str, pool_address: str, since_ms: int) -> float:
-    """Highest `high` price DexPaprika has recorded for this pool since
-    since_ms (epoch ms). Returns 0.0 if the chain has no DexPaprika network
-    mapping (see config.DEXPAPRIKA_NETWORKS), the pool is too new to have
-    any candles yet, or the lookup fails — same fail-soft pattern as the
-    rest of this codebase, so callers can fall back to another source.
+def _fetch_ohlcv_candles(network: str, pool_address: str, since_ms: int, until_ms: int = None):
+    """Raw DexPaprika candles for [since_ms, until_ms] (until_ms defaults to
+    now). Returns [] on any failure/empty result — never raises, so callers
+    can fall back to another source.
 
-    No API key needed — DexPaprika's pool OHLCV endpoint is public.
+    DexPaprika caps a single request to a 1-year span, so since_ms is
+    clamped to at most ~364 days back; a token older than that will only
+    get candles from within the last year (rare for the memecoin-heavy
+    tokens this bot deals with, but worth knowing about).
     """
-    network = DEXPAPRIKA_NETWORKS.get(chain_id)
     if not network or not pool_address or not since_ms:
-        return 0.0
+        return []
 
-    now_ms = int(time.time() * 1000)
+    now_ms = until_ms or int(time.time() * 1000)
+    one_year_ms = 364 * 24 * 3600 * 1000
+    since_ms = max(since_ms, now_ms - one_year_ms)
+
     elapsed_seconds = max((now_ms - since_ms) / 1000, 60)  # floor at 1 min
     interval = _pick_ohlcv_interval(elapsed_seconds)
     start = datetime.fromtimestamp(since_ms / 1000, tz=timezone.utc).strftime(
@@ -280,11 +283,75 @@ def fetch_peak_price(chain_id: str, pool_address: str, since_ms: int) -> float:
         )
         if not r.ok:
             print(f"DexPaprika OHLCV rejected: status={r.status_code} body={r.text[:300]!r}")
-            return 0.0
-        candles = r.json() or []
-        if not candles:
-            return 0.0
-        return max(float(c.get("high") or 0) for c in candles)
+            return []
+        return r.json() or []
     except Exception as err:
-        print(f"DexPaprika OHLCV peak-price lookup failed for {pool_address}: {err}")
+        print(f"DexPaprika OHLCV lookup failed for {pool_address}: {err}")
+        return []
+
+
+def fetch_peak_price(chain_id: str, pool_address: str, since_ms: int) -> float:
+    """Highest `high` price DexPaprika has recorded for this pool since
+    since_ms (epoch ms). Returns 0.0 if the chain has no DexPaprika network
+    mapping (see config.DEXPAPRIKA_NETWORKS), the pool is too new to have
+    any candles yet, or the lookup fails.
+
+    No API key needed — DexPaprika's pool OHLCV endpoint is public.
+    """
+    network = DEXPAPRIKA_NETWORKS.get(chain_id)
+    candles = _fetch_ohlcv_candles(network, pool_address, since_ms)
+    if not candles:
         return 0.0
+    return max(float(c.get("high") or 0) for c in candles)
+
+
+def fetch_ath_from_ohlcv(
+    chain_id: str, pool_address: str, since_ms: int, current_price: float, current_mc: float
+):
+    """The token's real all-time-high market cap AND when it actually
+    happened, read straight from DexPaprika's historical candles — not
+    inferred from whenever the bot happened to be polling. Returns
+    (ath_mc, ath_at_ms), or (0.0, 0) if it can't be determined (unsupported
+    chain, pool too new, current_price missing, or the lookup fails), so
+    callers should fall back to get_ath_mc()'s floor in that case.
+
+    OHLCV gives price, not market cap, so this converts using the
+    price -> mc ratio implied by the live pair (mc = price * supply, and
+    that ratio is assumed constant — true for the fixed-supply memecoins
+    this bot mostly deals with, since Pump.fun-style launches mint the
+    full supply upfront and don't mint/burn afterward).
+    """
+    network = DEXPAPRIKA_NETWORKS.get(chain_id)
+    current_price = float(current_price or 0)
+    current_mc = float(current_mc or 0)
+    if not network or not pool_address or not since_ms or current_price <= 0:
+        return 0.0, 0
+
+    candles = _fetch_ohlcv_candles(network, pool_address, since_ms)
+    if not candles:
+        return 0.0, 0
+
+    peak_candle = max(candles, key=lambda c: float(c.get("high") or 0))
+    peak_price = float(peak_candle.get("high") or 0)
+    if peak_price <= 0:
+        return 0.0, 0
+
+    supply = current_mc / current_price if current_price > 0 else 0
+    candle_ath_mc = peak_price * supply
+
+    time_open = peak_candle.get("time_open")
+    try:
+        candle_at_ms = int(
+            datetime.fromisoformat(str(time_open).replace("Z", "+00:00")).timestamp() * 1000
+        )
+    except (TypeError, ValueError):
+        candle_at_ms = 0
+
+    # Live price can already be past the last completed candle (DexPaprika
+    # candles lag slightly behind real-time), so never report an ATH below
+    # what's happening right now — if the current mc is actually the
+    # highest we know about, the ATH is "now".
+    if current_mc >= candle_ath_mc:
+        return current_mc, int(time.time() * 1000)
+
+    return candle_ath_mc, candle_at_ms
