@@ -2,6 +2,20 @@ import os
 import threading
 import time
 
+# Pre-import netrc, eagerly, before the background thread (below) ever
+# starts. `requests` does a LAZY `from netrc import ...` internally on the
+# very first HTTP call in the process (see requests/utils.py's
+# get_netrc_auth). If two threads — the background refresher and a
+# webhook request handler — both happen to make their first-ever
+# requests.get() call around the same moment, they can race on Python's
+# module import lock while importing netrc for the first time. That race
+# is what caused a real WORKER TIMEOUT crash (gunicorn's 30s SIGALRM fired
+# while a thread was blocked in _lock_unlock_module/acquire, mid-import).
+# Importing it once here, before any thread makes an HTTP call, means
+# netrc is already cached in sys.modules by the time either thread's first
+# requests.get() runs, so there's nothing left to race on.
+import netrc  # noqa: F401
+
 from flask import Flask, request, jsonify
 
 import bot

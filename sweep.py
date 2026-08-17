@@ -146,13 +146,17 @@ def fast_refresh_ath():
     if not targets:
         return {"fast_checked": 0}
 
-    mc_cache = {}
+    # One batched request per 30 distinct CAs instead of one request per
+    # target — see dexscreener.fetch_market_caps_batch for why (this loop
+    # was the direct cause of the 429 storm: N single-token requests fired
+    # back to back every 10s blew through Dexscreener's 300 req/min limit
+    # once there were more than a couple dozen tracked tokens).
+    distinct_cas = [ca for _, ca in targets]
+    mc_cache = dexscreener.fetch_market_caps_batch(distinct_cas)
     checked = 0
     for chat_id, ca in targets:
         checked += 1
-        if ca not in mc_cache:
-            mc_cache[ca] = dexscreener.fetch_market_cap(ca)
-        mc = mc_cache[ca]
+        mc = mc_cache.get(ca)
         if not mc:
             continue
 
