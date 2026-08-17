@@ -1,6 +1,7 @@
 """Solana Tracker market-data adapter used by WaveScan."""
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import requests
 
@@ -69,15 +70,35 @@ def _search_stats(ca: str):
 
 
 def fetch_best_pair(ca: str):
-    """Fetch and normalize one token from Solana Tracker's /tokens/{mint} endpoint."""
+    """Fetch and normalize one token from Solana Tracker's /tokens/{mint} endpoint.
+
+    /tokens/{mint}, /search, /stats/{mint}, /tokens/{mint}/ath, and the
+    Dexscreener orders lookup are all independent of each other — none of
+    them need another's result as input — so they're fired concurrently
+    instead of one after another. Run sequentially this was 5 network
+    round-trips stacked back to back (the actual cause of /pnl and /data
+    sometimes taking 10+ seconds); run in parallel it's bounded by the
+    single slowest call instead of the sum of all five.
+    """
     try:
-        data = _get_json(f"{SOLANATRACKER_API}/tokens/{ca}")
-        if not data or not data.get("token"):
-            return None
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            fut_primary = executor.submit(_get_json, f"{SOLANATRACKER_API}/tokens/{ca}")
+            fut_search = executor.submit(_search_stats, ca)
+            fut_stats = executor.submit(fetch_token_stats, ca)
+            fut_ath = executor.submit(fetch_ath, ca)
+            fut_orders = executor.submit(_fetch_dex_orders, ca)
+
+            data = fut_primary.result()
+            if not data or not data.get("token"):
+                return None
+
+            search = fut_search.result()
+            stats = fut_stats.result()
+            _, ath_from_endpoint = fut_ath.result()
+            orders = fut_orders.result()
 
         token = data.get("token") or {}
         pool = _first_pool(data)
-        search = _search_stats(ca)
         events = data.get("events") or {}
         risk = data.get("risk") or {}
         creation = token.get("creation") or {}
@@ -97,7 +118,6 @@ def fetch_best_pair(ca: str):
         # the "events" priceChangePercentage buckets already on /tokens),
         # so this checks a couple of plausible shapes for the volume value.
         vol1h = 0.0
-        stats = fetch_token_stats(ca)
         tf_stats = stats.get("1h") if isinstance(stats.get("1h"), dict) else {}
         if tf_stats:
             v = tf_stats.get("volume")
@@ -127,7 +147,6 @@ def fetch_best_pair(ca: str):
         # just echoes the current market cap rather than a real peak. The
         # dedicated /ath endpoint tracks the true highest market cap across
         # every trade Solana Tracker has indexed for this token.
-        _, ath_from_endpoint = fetch_ath(ca)
         ath_mc = max([mc, ath_from_endpoint] + mc_values)
 
         change24 = float((events.get("24h") or {}).get("priceChangePercentage") or 0)
@@ -152,7 +171,7 @@ def fetch_best_pair(ca: str):
             "websites": [],
         }
 
-        orders = _fetch_dex_orders(ca)
+        # `orders` was already fetched concurrently above alongside search/stats/ath.
         dex_paid = any(
             o.get("type") == "tokenProfile" and o.get("status") == "approved"
             for o in orders
