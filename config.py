@@ -64,3 +64,7 @@ TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 # yet (common for pairs that are only seconds/minutes old).
 SOLANATRACKER_API = "https://data.solanatracker.io"
 SOLANATRACKER_API_KEY = os.environ.get("SOLANATRACKER_API_KEY")
+
+# Gemini — powers the "Hoody" AI chat persona (see gemini.py). Get a key at
+# https://aistudio.google.com/apikey
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")

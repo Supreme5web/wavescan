@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import dexscreener
+import gemini
 import leaderboard
 import pnl_card
 import pnl_lookup
@@ -22,6 +23,15 @@ from utils import (
 
 ALERT_KEY = "alert:{chat_id}:{ca}:{user_id}"
 GROUP_CHAT_TYPES = ("group", "supergroup")
+
+# Matches "hoody" as a whole word, case-insensitive, anywhere in a message
+# — that's the trigger for the Gemini-powered chat persona (see gemini.py).
+HOODY_RE = re.compile(r"\bhoody\b", re.IGNORECASE)
+# Each thread's history is stashed in Redis under the message_id Hoody just
+# sent, so a reply to that specific message can pick the conversation back
+# up. No TTL here (storage.set_json doesn't support one) — stale threads
+# just sit there unused, which is cheap enough for a KV store like this.
+HOODY_KEY = "hoody:{chat_id}:{message_id}"
 
 START_MESSAGE = f"""
 *{BOT_NAME}* — fast Solana \\& multi\\-chain token lookups and market\\-cap alerts, right in Telegram\\.
@@ -497,6 +507,39 @@ def handle_pnl(chat_id, text, message_id):
             os.remove(path)
 
 
+def _load_hoody_history(chat_id, reply_to_message):
+    """If `reply_to_message` is one of Hoody's own past replies, returns
+    its stored history (oldest turn first) so the conversation can
+    continue. Returns [] if this isn't a reply to a tracked Hoody thread."""
+    if not reply_to_message:
+        return []
+    if not (reply_to_message.get("from") or {}).get("is_bot"):
+        return []
+    parent_id = reply_to_message.get("message_id")
+    if not parent_id:
+        return []
+    stored = storage.get_json(HOODY_KEY.format(chat_id=chat_id, message_id=parent_id))
+    return (stored or {}).get("history") or []
+
+
+def handle_hoody(chat_id, text, message_id, history):
+    """Responds in-character as Hoody (Gemini-powered, see gemini.py).
+    `history` is the prior thread (possibly []) as loaded by
+    _load_hoody_history."""
+    history = list(history)
+    history.append({"role": "user", "text": text})
+
+    reply_text = gemini.ask_hoody(history)
+    history.append({"role": "model", "text": reply_text})
+
+    sent_id = send_message(chat_id, escape_md(reply_text), message_id)
+    if sent_id:
+        storage.set_json(
+            HOODY_KEY.format(chat_id=chat_id, message_id=sent_id),
+            {"history": history},
+        )
+
+
 def handle_callback(callback_query: dict):
     """Handles the Refresh and Delete buttons under a /data card."""
     cq_id = callback_query["id"]
@@ -618,3 +661,12 @@ def handle_update(update: dict):
         handle_pnl(chat_id, text, message_id)
     elif CA_RE.fullmatch(text):
         handle_data(chat_id, text, message_id, user, chat_type)
+    else:
+        # Hoody triggers on: (a) anyone saying its name, or (b) a direct
+        # reply to one of Hoody's own past messages (checked by looking
+        # up whether that message has a tracked thread in storage) — a
+        # reply to some other bot message, like a token card, doesn't count.
+        reply_to = message.get("reply_to_message")
+        hoody_history = _load_hoody_history(chat_id, reply_to)
+        if text and (HOODY_RE.search(text) or hoody_history):
+            handle_hoody(chat_id, text, message_id, hoody_history)

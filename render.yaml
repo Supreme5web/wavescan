@@ -22,3 +22,5 @@ services:
         sync: false
       - key: SOLANATRACKER_API_KEY
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false

@@ -7,7 +7,10 @@ from utils import escape_md  # re-exported for convenience
 def send_message(chat_id, text, reply_to=None, keyboard=None, preview_url=None):
     """preview_url, if given, is scraped by Telegram for a link-preview
     embed (see app.py's /card/<ca>/<nonce> route) instead of appearing as
-    a visible link — the message text itself is unaffected."""
+    a visible link — the message text itself is unaffected.
+
+    Returns the sent message's message_id on success (used e.g. by Hoody
+    to thread replies), or None on failure."""
     payload = {
         "chat_id": chat_id,
         "text": text,
@@ -30,8 +33,11 @@ def send_message(chat_id, text, reply_to=None, keyboard=None, preview_url=None):
         r = requests.post(f"{TELEGRAM_API}/sendMessage", json=payload, timeout=10)
         if not r.ok:
             print("sendMessage rejected:", r.text)
+            return None
+        return (r.json().get("result") or {}).get("message_id")
     except Exception as err:
         print("sendMessage failed:", err)
+        return None
 
 
 def send_photo(chat_id, photo_url, caption, reply_to=None, keyboard=None) -> bool:
