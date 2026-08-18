@@ -78,7 +78,7 @@ def webhook():
 
 # Alert sweep, reachable over HTTP so a free external scheduler (e.g.
 # cron-job.org) can trigger it — an alternative to Render's paid Cron Job
-# service when running WaveScan as a single free Web Service.
+# service when running HoodScan as a single free Web Service.
 # Set CRON_SECRET and call this as /sweep?secret=YOUR_SECRET on a schedule.
 @app.get("/sweep")
 @app.post("/sweep")
