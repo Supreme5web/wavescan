@@ -67,7 +67,7 @@ def _fetch_candles(network: str, pool_address: str, since_ms: int, interval: str
         start = datetime.fromtimestamp(since_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         r = requests.get(
             f"{DEXPAPRIKA_API}/networks/{network}/pools/{pool_address}/ohlcv",
-            params={"start": start, "interval": interval, "limit": 500},
+            params={"start": start, "interval": interval, "limit": 366},
             headers=_dexpaprika_headers(),
             timeout=10,
         )

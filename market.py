@@ -266,7 +266,9 @@ _OHLCV_INTERVALS_SECONDS = [
     ("24h", 86400),
 ]
 # Cap how many candles we ask for in one request (no pagination here).
-_MAX_CANDLES = 500
+# DexPaprika rejects any limit above 366 with a 400 (confirmed live —
+# their docs still advertise up to 500).
+_MAX_CANDLES = 366
 
 
 def _pick_ohlcv_interval(elapsed_seconds: float) -> str:
