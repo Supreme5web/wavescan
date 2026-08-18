@@ -24,6 +24,12 @@ SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
 DEXSCREENER_API = "https://api.dexscreener.com"
 DEXPAPRIKA_API = "https://api.dexpaprika.com"
 
+# Free key from console.dexpaprika.com — raises the shared keyless quota
+# (50K/month) to 300K/month. Optional: requests fall back to keyless if unset.
+# Sent as a raw Authorization header (no Bearer prefix) — see
+# market._dexpaprika_headers, confirmed against console.dexpaprika.com.
+DEXPAPRIKA_API_KEY = os.environ.get("DEXPAPRIKA_API_KEY")
+
 # Dexscreener chainId -> DexPaprika network slug, for OHLCV peak-price lookups.
 DEXPAPRIKA_NETWORKS = {
     "solana": "solana",

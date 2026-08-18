@@ -7,6 +7,7 @@ import requests
 
 from config import (
     DEXPAPRIKA_API,
+    DEXPAPRIKA_API_KEY,
     DEXPAPRIKA_NETWORKS,
     SOLANATRACKER_API,
     SOLANATRACKER_API_KEY,
@@ -16,6 +17,14 @@ from solanatracker import fetch_ath, fetch_token_stats
 
 def _headers():
     return {"x-api-key": SOLANATRACKER_API_KEY}
+
+
+def _dexpaprika_headers():
+    """Attach the DexPaprika key if one is set; keyless requests (empty
+    dict) still work, just against the lower shared quota. Confirmed via
+    console.dexpaprika.com: the key goes in the Authorization header as-is
+    (no Bearer/scheme prefix)."""
+    return {"Authorization": DEXPAPRIKA_API_KEY} if DEXPAPRIKA_API_KEY else {}
 
 
 def _get_json(url, params=None):
@@ -298,6 +307,7 @@ def _fetch_ohlcv_candles(network: str, pool_address: str, since_ms: int, until_m
         r = requests.get(
             f"{DEXPAPRIKA_API}/networks/{network}/pools/{pool_address}/ohlcv",
             params={"start": start, "interval": interval, "limit": _MAX_CANDLES},
+            headers=_dexpaprika_headers(),
             timeout=8,
         )
         if not r.ok:

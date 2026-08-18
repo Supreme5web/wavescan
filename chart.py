@@ -21,7 +21,7 @@ import pandas as pd
 import requests
 
 from config import BOT_USERNAME, DEXPAPRIKA_API, DEXPAPRIKA_NETWORKS
-from market import fetch_best_pair
+from market import _dexpaprika_headers, fetch_best_pair
 
 # label -> fetch config. 4H isn't a DexPaprika interval (see market.py's
 # comment on _OHLCV_INTERVALS_SECONDS), so it's built by pulling 1h candles
@@ -68,6 +68,7 @@ def _fetch_candles(network: str, pool_address: str, since_ms: int, interval: str
         r = requests.get(
             f"{DEXPAPRIKA_API}/networks/{network}/pools/{pool_address}/ohlcv",
             params={"start": start, "interval": interval, "limit": 500},
+            headers=_dexpaprika_headers(),
             timeout=10,
         )
         if not r.ok:
