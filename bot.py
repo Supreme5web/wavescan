@@ -3,6 +3,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
+import chart
 import dexscreener
 import gemini
 import leaderboard
@@ -41,6 +42,7 @@ Commands:
 /alerts \\- list your active alerts
 /cancel `<ca>` \\- cancel an alert
 /leaderboard \\- top callers in this group, ranked by best multiplier
+/chart `<ca> [5m|15m|1H|4H|1D]` \\- candlestick chart, market\\-cap axis \\(default 1H\\)
 /pnl `<ca>` \\- card showing this chat's first call on a token vs\\. its peak
 /ping \\- check if the bot is alive
 """.strip()
@@ -74,6 +76,7 @@ def _jump_link(chat_id, message_id):
 def _action_keyboard(ca: str):
     return {"inline_keyboard": [[
         {"text": "🔄 Refresh", "callback_data": f"refresh:{ca}"},
+        {"text": "📈 Chart", "callback_data": f"chart:{ca}:1H"},
         {"text": "🗑️ Delete", "callback_data": "delete"},
     ]]}
 
@@ -304,6 +307,50 @@ def handle_data(chat_id, ca, message_id, user=None, chat_type=None):
     # (no wrapper page of ours involved, so Telegram shows just the picture
     # with no site-name bar) instead of uploaded via sendPhoto.
     send_message(chat_id, caption, message_id, keyboard, preview_url=_display_image(pair, ca))
+
+
+CHART_TIMEFRAMES = ("5m", "15m", "1H", "4H", "1D")
+
+
+def _chart_keyboard(ca: str, active_tf: str):
+    return {"inline_keyboard": [
+        [
+            {"text": f"🔵 {tf}" if tf == active_tf else tf, "callback_data": f"chart:{ca}:{tf}"}
+            for tf in CHART_TIMEFRAMES
+        ],
+        [{"text": "🗑️ Delete", "callback_data": "delete"}],
+    ]}
+
+
+def _send_chart(chat_id, ca, timeframe, reply_to=None):
+    """Renders and sends one chart image, then always cleans up the temp
+    PNG (generate_chart's caller-owns-the-file convention, same as
+    pnl_card.generate_pnl_card)."""
+    try:
+        path = chart.generate_chart(ca, timeframe)
+    except ValueError:
+        send_message(chat_id, "⚠️ Unknown timeframe \\- use `5m`, `15m`, `1H`, `4H`, or `1D`\\.", reply_to)
+        return
+    except RuntimeError as err:
+        send_message(chat_id, f"❌ {escape_md(str(err))}", reply_to)
+        return
+
+    try:
+        if not send_photo_file(chat_id, path, reply_to=reply_to, keyboard=_chart_keyboard(ca, timeframe)):
+            send_message(chat_id, "⚠️ Couldn't generate the chart, try again\\.", reply_to)
+    finally:
+        if path and os.path.exists(path):
+            os.remove(path)
+
+
+def handle_chart(chat_id, text, message_id):
+    parts = text.split()
+    ca = parts[1] if len(parts) >= 2 else None
+    timeframe = parts[2] if len(parts) >= 3 else "1H"
+    if not ca or not CA_RE.fullmatch(ca):
+        send_message(chat_id, "Usage: `/chart <contract address> [5m|15m|1H|4H|1D]`", message_id)
+        return
+    _send_chart(chat_id, ca, timeframe, message_id)
 
 
 def handle_alert(chat_id, text, message_id, user):
@@ -595,6 +642,24 @@ def handle_callback(callback_query: dict):
             answer_callback_query(cq_id, "⚠️ Couldn't switch, try again", show_alert=True)
         return
 
+    if data.startswith("chart:"):
+        _, ca, timeframe = data.split(":", 2)
+        if not (ca and CA_RE.fullmatch(ca) and chat_id):
+            answer_callback_query(cq_id, "⚠️ Can't generate this chart", show_alert=True)
+            return
+        answer_callback_query(cq_id, f"📈 {timeframe}")
+        # Two contexts land here: tapping "Chart" on a /data token card
+        # (that message has no photo — leave it alone, just send the chart
+        # as a reply), or switching timeframe on an existing chart image
+        # (that message IS a photo — Telegram can't swap a photo's file via
+        # editMessageCaption, so replace it: send the new one, then drop
+        # the old one).
+        is_chart_message = bool(message.get("photo"))
+        _send_chart(chat_id, ca, timeframe, reply_to=None if is_chart_message else message_id)
+        if is_chart_message and message_id:
+            delete_message(chat_id, message_id)
+        return
+
     if not data.startswith("refresh:"):
         answer_callback_query(cq_id)
         return
@@ -659,6 +724,8 @@ def handle_update(update: dict):
         handle_leaderboard(chat_id, message_id, chat_type)
     elif text.startswith("/pnl"):
         handle_pnl(chat_id, text, message_id)
+    elif text.startswith("/chart"):
+        handle_chart(chat_id, text, message_id)
     elif CA_RE.fullmatch(text):
         handle_data(chat_id, text, message_id, user, chat_type)
     else:
