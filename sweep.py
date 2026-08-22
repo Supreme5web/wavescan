@@ -11,6 +11,10 @@ from telegram import send_message
 from utils import escape_md, format_usd_short
 
 
+# Milestones that trigger a group alert when a call's multiplier crosses them.
+_MILESTONES = [2, 5, 10, 20, 30, 50, 100]
+
+
 def _mention(record: dict) -> str:
     if record.get("username"):
         return f"@{escape_md(record['username'])}"
@@ -75,12 +79,22 @@ def _mention_call(row: dict) -> str:
     return f"[{label}](tg://user?id={row['user_id']})"
 
 
-def _send_2x_alert(chat_id, row: dict, symbol: str, mult: float):
+def _send_milestone_alert(chat_id, row: dict, symbol: str, milestone: int):
     text = "\n".join([
-        "🚀 *2X CALL\\!*",
-        f"{_mention_call(row)} called *${escape_md(symbol)}* — now *{escape_md(f'{mult:.1f}x')}* 🔥",
+        f"🚀 *{milestone}X CALL\\!*",
+        f"{_mention_call(row)} called *${escape_md(symbol)}* — now *{escape_md(f'{milestone}x')}* 🔥",
     ])
     send_message(chat_id, text, reply_to=row.get("message_id"))
+
+
+def _check_milestones(chat_id, row: dict, symbol: str, old_mult: float, new_mult: float):
+    """Fire an alert for every milestone the call just crossed for the first time."""
+    for m in _MILESTONES:
+        if new_mult >= m and old_mult < m:
+            try:
+                _send_milestone_alert(chat_id, row, symbol, m)
+            except Exception as err:
+                print(f"Milestone alert failed for chat={chat_id} ca={row.get('ca')} milestone={m}x:", err)
 
 
 def _sweep_leaderboard():
@@ -111,11 +125,7 @@ def _sweep_leaderboard():
                 continue
             old_mult = float(row.get("best_mc") or 0) / entry_mc
             new_mult = mc / entry_mc
-            if new_mult >= 2 and old_mult < 2:
-                try:
-                    _send_2x_alert(chat_id, row, row.get("symbol") or symbol, new_mult)
-                except Exception as err:
-                    print(f"2x alert failed for chat={chat_id} ca={ca}:", err)
+            _check_milestones(chat_id, row, row.get("symbol") or symbol, old_mult, new_mult)
 
         leaderboard.update_best(chat_id, ca, mc)
 
@@ -133,10 +143,10 @@ def fast_refresh_ath():
     handled in bot.py via market.fetch_ath_from_ohlcv — real historical
     candles, not this loop.)
 
-    IMPORTANT: this also has to own the 2x-crossing alert. Since this loop
-    ratchets best_mc every 10s, by the time the slower `/sweep` cron runs
-    best_mc is usually already past 2x, so its own crossing check
-    (old_mult < 2 and new_mult >= 2) would never fire — this loop sees the
+    IMPORTANT: this also has to own the milestone-crossing alerts. Since
+    this loop ratchets best_mc every 10s, by the time the slower `/sweep`
+    cron runs best_mc is usually already past the lower milestones, so
+    its own crossing check would never fire — this loop sees the
     crossing first, so it has to be the one to send it.
     """
     if not leaderboard.available():
@@ -146,11 +156,6 @@ def fast_refresh_ath():
     if not targets:
         return {"fast_checked": 0}
 
-    # One batched request per 30 distinct CAs instead of one request per
-    # target — see dexscreener.fetch_market_caps_batch for why (this loop
-    # was the direct cause of the 429 storm: N single-token requests fired
-    # back to back every 10s blew through Dexscreener's 300 req/min limit
-    # once there were more than a couple dozen tracked tokens).
     distinct_cas = [ca for _, ca in targets]
     mc_cache = dexscreener.fetch_market_caps_batch(distinct_cas)
     checked = 0
@@ -166,12 +171,8 @@ def fast_refresh_ath():
                 continue
             old_mult = float(row.get("best_mc") or 0) / entry_mc
             new_mult = mc / entry_mc
-            if new_mult >= 2 and old_mult < 2:
-                symbol = row.get("symbol") or "UNKNOWN"
-                try:
-                    _send_2x_alert(chat_id, row, symbol, new_mult)
-                except Exception as err:
-                    print(f"2x alert failed for chat={chat_id} ca={ca}:", err)
+            symbol = row.get("symbol") or "UNKNOWN"
+            _check_milestones(chat_id, row, symbol, old_mult, new_mult)
 
         leaderboard.update_best(chat_id, ca, mc)
 
