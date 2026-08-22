@@ -5,7 +5,7 @@ import requests
 from config import GEMINI_API_KEY, GEMINI_ENABLE_SEARCH
 
 GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models"
-GEMINI_MODEL = "gemini-1.5-flash-latest"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 MAX_HISTORY_TURNS = 16
 
