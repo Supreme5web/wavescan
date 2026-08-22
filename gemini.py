@@ -1,14 +1,8 @@
-"""'Hoody' — a Gemini-powered chat persona baked into the bot.
-
-Triggered whenever someone's message mentions "hoody" by name, and keeps
-the thread going if someone replies directly to one of Hoody's own
-messages (see bot.py's handle_hoody / _hoody_key for the reply-threading
-side of this).
-"""
+"""'Hoody' — a Gemini-powered chat persona baked into the bot."""
 
 import requests
 
-from config import GEMINI_API_KEY
+from config import GEMINI_API_KEY, GEMINI_ENABLE_SEARCH
 
 GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_MODEL = "gemini-3.5-flash-lite"
@@ -53,10 +47,12 @@ feature powered by Gemini.
 """.strip()
 
 
-def ask_hoody(history: list) -> str:
+def ask_hoody(history: list, context: str = None) -> str:
     """history is a list of {"role": "user"|"model", "text": str} turns,
-    oldest first, ending with the newest user turn. Returns Hoody's reply
-    text (never raises — falls back to an in-character error line)."""
+    oldest first, ending with the newest user turn. `context` is an
+    optional block of live token data / trend intent to prepend to the
+    system prompt. Returns Hoody's reply text (never raises — falls back
+    to an in-character error line)."""
     if not GEMINI_API_KEY:
         return "oi my brain ain't even plugged in fam, tell supremee to sort the gemini key 💀"
 
@@ -66,14 +62,31 @@ def ask_hoody(history: list) -> str:
         for turn in trimmed
     ]
 
+    system_text = SYSTEM_PROMPT
+    if context:
+        system_text += (
+            f"\n\n--- CURRENT CONTEXT ---\n{context}"
+            f"--- END CONTEXT ---\n"
+            f"Use the above context to answer accurately. "
+            f"If token data is present, quote specific numbers where relevant. "
+            f"If the user is asking about recent events and you lack real-time data, "
+            f"say so clearly rather than guessing."
+        )
+
     payload = {
-        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "system_instruction": {"parts": [{"text": system_text}]},
         "contents": contents,
         "generationConfig": {
             "temperature": 1.0,
             "maxOutputTokens": 300,
         },
     }
+
+    if GEMINI_ENABLE_SEARCH:
+        # Enables Gemini's built-in Google Search grounding.
+        # Requires a model that supports search tools (gemini-1.5-pro,
+        # gemini-1.5-flash, gemini-2.0-flash, etc.).
+        payload["tools"] = [{"google_search_retrieval": {}}]
 
     try:
         r = requests.post(

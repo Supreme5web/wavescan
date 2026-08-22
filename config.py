@@ -68,3 +68,8 @@ SOLANATRACKER_API_KEY = os.environ.get("SOLANATRACKER_API_KEY")
 # Gemini — powers the "Hoody" AI chat persona (see gemini.py). Get a key at
 # https://aistudio.google.com/apikey
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+# Enable Gemini's built-in Google Search tool for real-time news,
+# trends, and lore answers. Requires a model that supports search
+# grounding (e.g. gemini-1.5-pro, gemini-1.5-flash, gemini-2.0-flash).
+GEMINI_ENABLE_SEARCH = os.environ.get("GEMINI_ENABLE_SEARCH", "false").lower() == "true"

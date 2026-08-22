@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import dexscreener
+import hoody_context
 import gemini
 import leaderboard
 import pnl_card
@@ -529,7 +530,10 @@ def handle_hoody(chat_id, text, message_id, history):
     history = list(history)
     history.append({"role": "user", "text": text})
 
-    reply_text = gemini.ask_hoody(history)
+    # Enrich Hoody with live token data and trend intent when relevant
+    context = hoody_context.build_context(text)
+
+    reply_text = gemini.ask_hoody(history, context=context)
     history.append({"role": "model", "text": reply_text})
 
     sent_id = send_message(chat_id, escape_md(reply_text), message_id)
