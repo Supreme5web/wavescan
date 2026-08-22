@@ -523,7 +523,7 @@ def _load_hoody_history(chat_id, reply_to_message):
     return (stored or {}).get("history") or []
 
 
-def handle_hoody(chat_id, text, message_id, history):
+def handle_hoody(chat_id, text, message_id, history, reply_to_message=None, user_id=None):
     """Responds in-character as Hoody (Gemini-powered, see gemini.py).
     `history` is the prior thread (possibly []) as loaded by
     _load_hoody_history."""

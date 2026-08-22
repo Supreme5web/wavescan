@@ -1,0 +1,50 @@
+2026-08-22T11:09:27.207228843Z ==> ///////////////////////////////////////////////////////////
+2026-08-22T11:09:27.209520588Z ==> 
+2026-08-22T11:09:27.211859653Z ==> Available at your primary URL https://wavescan-bot-3vgl.onrender.com
+2026-08-22T11:09:27.214344662Z ==> 
+2026-08-22T11:09:27.216404672Z ==> ///////////////////////////////////////////////////////////
+2026-08-22T11:09:27.301972161Z [2026-08-22 11:09:27 +0000] [58] [INFO] Shutting down: Master
+2026-08-22T11:09:27.302013082Z Background ATH refresher started (10s interval, Dexscreener)
+2026-08-22T11:14:32.144962062Z ==> Detected service running on port 10000
+2026-08-22T11:14:32.238059409Z ==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+2026-08-22T11:18:42.62920536Z 127.0.0.1 - - [22/Aug/2026:11:18:42 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:19:16.853819809Z 127.0.0.1 - - [22/Aug/2026:11:19:16 +0000] "POST /webhook HTTP/1.1" 200 12 "-" "-"
+2026-08-22T11:22:16.847544812Z 127.0.0.1 - - [22/Aug/2026:11:22:16 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:23:48.544844005Z 127.0.0.1 - - [22/Aug/2026:11:23:48 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:27:21.896797006Z 127.0.0.1 - - [22/Aug/2026:11:27:21 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:28:21.839296406Z 127.0.0.1 - - [22/Aug/2026:11:28:21 +0000] "POST /webhook HTTP/1.1" 200 12 "-" "-"
+2026-08-22T11:28:53.411222705Z 127.0.0.1 - - [22/Aug/2026:11:28:53 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:32:35.328335693Z 127.0.0.1 - - [22/Aug/2026:11:32:35 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:34:05.709104686Z 127.0.0.1 - - [22/Aug/2026:11:34:05 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:37:39.960542272Z 127.0.0.1 - - [22/Aug/2026:11:37:39 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:39:17.000701834Z 127.0.0.1 - - [22/Aug/2026:11:39:16 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:42:48.109916645Z 127.0.0.1 - - [22/Aug/2026:11:42:48 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:44:22.595170803Z 127.0.0.1 - - [22/Aug/2026:11:44:22 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:47:52.77579059Z 127.0.0.1 - - [22/Aug/2026:11:47:52 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:48:47.843154111Z ==> Deploying...
+2026-08-22T11:48:47.911788772Z ==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+2026-08-22T11:48:55.471890242Z ==> Running 'gunicorn app:app'
+2026-08-22T11:49:03.376038911Z [2026-08-22 11:49:03 +0000] [57] [INFO] Starting gunicorn 22.0.0
+2026-08-22T11:49:03.376453512Z [2026-08-22 11:49:03 +0000] [57] [INFO] Listening at: http://0.0.0.0:10000 (57)
+2026-08-22T11:49:03.376579435Z [2026-08-22 11:49:03 +0000] [57] [INFO] Using worker: sync
+2026-08-22T11:49:03.381170644Z [2026-08-22 11:49:03 +0000] [60] [INFO] Booting worker with pid: 60
+2026-08-22T11:49:03.524552724Z Background ATH refresher started (10s interval, Dexscreener)
+2026-08-22T11:49:03.524576154Z 127.0.0.1 - - [22/Aug/2026:11:49:03 +0000] "HEAD / HTTP/1.1" 200 0 "-" "Go-http-client/1.1"
+2026-08-22T11:49:08.344421948Z [2026-08-22 11:49:08 +0000] [40] [INFO] Handling signal: term
+2026-08-22T11:49:08.349577117Z [2026-08-22 11:49:08 +0000] [60] [INFO] Worker exiting (pid: 60)
+2026-08-22T11:49:08.758662104Z ==> Your service is live 🎉
+2026-08-22T11:49:08.79060794Z 127.0.0.1 - - [22/Aug/2026:11:49:08 +0000] "GET / HTTP/1.1" 200 27 "-" "Go-http-client/2.0"
+2026-08-22T11:49:08.840577795Z ==> 
+2026-08-22T11:49:08.842503204Z ==> ///////////////////////////////////////////////////////////
+2026-08-22T11:49:08.844229628Z ==> 
+2026-08-22T11:49:08.845812092Z ==> Available at your primary URL https://wavescan-bot-3vgl.onrender.com
+2026-08-22T11:49:08.847613161Z ==> 
+2026-08-22T11:49:08.849189405Z ==> ///////////////////////////////////////////////////////////
+2026-08-22T11:49:09.209113534Z [2026-08-22 11:49:09 +0000] [40] [INFO] Shutting down: Master
+2026-08-22T11:49:09.210362761Z Background ATH refresher started (10s interval, Dexscreener)
+2026-08-22T11:49:28.476900605Z 127.0.0.1 - - [22/Aug/2026:11:49:28 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T11:50:42.753053911Z handle_update failed: handle_hoody() got an unexpected keyword argument 'reply_to_message'
+2026-08-22T11:50:42.753076051Z 127.0.0.1 - - [22/Aug/2026:11:50:42 +0000] "POST /webhook HTTP/1.1" 200 12 "-" "-"
+2026-08-22T11:50:59.633374547Z 127.0.0.1 - - [22/Aug/2026:11:50:59 +0000] "POST /webhook HTTP/1.1" 200 12 "-" "-"
+2026-08-22T11:51:04.787671158Z handle_update failed: handle_hoody() got an unexpected keyword argument 'reply_to_message'
+2026-08-22T11:51:04.787693429Z 127.0.0.1 - - [22/Aug/2026:11:51:04 +0000] "POST /webhook HTTP/1.1" 200 12 "-" "-"
