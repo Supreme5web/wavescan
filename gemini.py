@@ -5,10 +5,8 @@ import requests
 from config import GEMINI_API_KEY, GEMINI_ENABLE_SEARCH
 
 GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models"
-GEMINI_MODEL = "gemini-3.5-flash-lite"
+GEMINI_MODEL = "gemini-1.5-flash-latest"
 
-# How many turns (user+model messages combined) of a thread to keep and
-# send back to Gemini — caps token usage/cost on long back-and-forths.
 MAX_HISTORY_TURNS = 16
 
 SYSTEM_PROMPT = """
@@ -66,7 +64,7 @@ def ask_hoody(history: list, context: str = None) -> str:
     if context:
         system_text += (
             f"\n\n--- CURRENT CONTEXT ---\n{context}"
-            f"--- END CONTEXT ---\n"
+            f"\n--- END CONTEXT ---\n"
             f"Use the above context to answer accurately. "
             f"If token data is present, quote specific numbers where relevant. "
             f"If the user is asking about recent events and you lack real-time data, "
@@ -83,29 +81,25 @@ def ask_hoody(history: list, context: str = None) -> str:
     }
 
     if GEMINI_ENABLE_SEARCH:
-        # Enables Gemini's built-in Google Search grounding.
-        # Requires a model that supports search tools (gemini-1.5-pro,
-        # gemini-1.5-flash, gemini-2.0-flash, etc.).
         payload["tools"] = [{"google_search_retrieval": {}}]
 
+    url = f"{GEMINI_API}/{GEMINI_MODEL}:generateContent"
+
     try:
-        r = requests.post(
-            f"{GEMINI_API}/{GEMINI_MODEL}:generateContent",
-            params={"key": GEMINI_API_KEY},
-            json=payload,
-            timeout=20,
-        )
+        r = requests.post(url, params={"key": GEMINI_API_KEY}, json=payload, timeout=20)
         if not r.ok:
-            print("Gemini request rejected:", r.status_code, r.text[:300])
+            print(f"[GEMINI ERROR] status={r.status_code} model={GEMINI_MODEL}")
+            print(f"[GEMINI ERROR] response={r.text[:800]}")
+            print(f"[GEMINI ERROR] search_enabled={GEMINI_ENABLE_SEARCH}")
             return "nah my connection's peak right now, gimme a sec bruv"
         data = r.json()
         candidates = data.get("candidates") or []
         if not candidates:
-            # Usually means the safety filters blocked it outright.
+            print(f"[GEMINI ERROR] No candidates returned. Response: {r.text[:500]}")
             return "ay can't cook that one up bruv, ask us summin' else"
         parts = (candidates[0].get("content") or {}).get("parts") or []
         text = "".join(p.get("text", "") for p in parts).strip()
         return text or "ay say that again, my head went blank for a sec 🥴"
     except Exception as err:
-        print("Gemini request failed:", err)
+        print(f"[GEMINI ERROR] Request failed: {err}")
         return "nah my connection's peak right now, gimme a sec bruv"

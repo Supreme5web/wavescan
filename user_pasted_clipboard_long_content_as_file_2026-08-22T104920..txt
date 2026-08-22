@@ -1,0 +1,50 @@
+2026-08-22T10:49:20.14638291Z ==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+2026-08-22T10:49:27.93719412Z ==> Running 'gunicorn app:app'
+2026-08-22T10:49:34.340656839Z [2026-08-22 10:49:34 +0000] [57] [INFO] Starting gunicorn 22.0.0
+2026-08-22T10:49:34.341374742Z [2026-08-22 10:49:34 +0000] [57] [INFO] Listening at: http://0.0.0.0:10000 (57)
+2026-08-22T10:49:34.341388633Z [2026-08-22 10:49:34 +0000] [57] [INFO] Using worker: sync
+2026-08-22T10:49:34.433533127Z [2026-08-22 10:49:34 +0000] [59] [INFO] Booting worker with pid: 59
+2026-08-22T10:49:34.741339546Z Background ATH refresher started (10s interval, Dexscreener)
+2026-08-22T10:49:34.741367778Z 127.0.0.1 - - [22/Aug/2026:10:49:34 +0000] "HEAD / HTTP/1.1" 200 0 "-" "Go-http-client/1.1"
+2026-08-22T10:49:40.959202458Z ==> Your service is live 🎉
+2026-08-22T10:49:41.071163727Z 127.0.0.1 - - [22/Aug/2026:10:49:41 +0000] "GET / HTTP/1.1" 200 27 "-" "Go-http-client/2.0"
+2026-08-22T10:49:41.102229279Z ==> 
+2026-08-22T10:49:41.107038943Z ==> ///////////////////////////////////////////////////////////
+2026-08-22T10:49:41.110369481Z ==> 
+2026-08-22T10:49:41.113668207Z ==> Available at your primary URL https://wavescan-bot-3vgl.onrender.com
+2026-08-22T10:49:41.117812184Z ==> 
+2026-08-22T10:49:41.121495927Z ==> ///////////////////////////////////////////////////////////
+2026-08-22T10:49:46.550889728Z Gemini request rejected: 429 {
+2026-08-22T10:49:46.550926451Z   "error": {
+2026-08-22T10:49:46.550949522Z     "code": 429,
+2026-08-22T10:49:46.550959173Z     "message": "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. ",
+2026-08-22T10:49:46.550964723Z     "stat
+2026-08-22T10:49:46.550969383Z 127.0.0.1 - - [22/Aug/2026:10:49:46 +0000] "POST /webhook HTTP/1.1" 200 12 "-" "-"
+2026-08-22T10:50:43.51598642Z Gemini request rejected: 429 {
+2026-08-22T10:50:43.516007851Z   "error": {
+2026-08-22T10:50:43.516012322Z     "code": 429,
+2026-08-22T10:50:43.516016882Z     "message": "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. ",
+2026-08-22T10:50:43.516020842Z     "stat
+2026-08-22T10:50:43.516025723Z 127.0.0.1 - - [22/Aug/2026:10:50:43 +0000] "POST /webhook HTTP/1.1" 200 12 "-" "-"
+2026-08-22T10:50:52.046962646Z Gemini request rejected: 429 {
+2026-08-22T10:50:52.046983688Z   "error": {
+2026-08-22T10:50:52.046988588Z     "code": 429,
+2026-08-22T10:50:52.046993438Z     "message": "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. ",
+2026-08-22T10:50:52.046997548Z     "stat
+2026-08-22T10:50:52.047003949Z 127.0.0.1 - - [22/Aug/2026:10:50:52 +0000] "POST /webhook HTTP/1.1" 200 12 "-" "-"
+2026-08-22T10:51:23.654311699Z Gemini request rejected: 429 {
+2026-08-22T10:51:23.65433405Z   "error": {
+2026-08-22T10:51:23.654338241Z     "code": 429,
+2026-08-22T10:51:23.654341571Z     "message": "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. ",
+2026-08-22T10:51:23.654344451Z     "stat
+2026-08-22T10:51:23.654348911Z 127.0.0.1 - - [22/Aug/2026:10:51:23 +0000] "POST /webhook HTTP/1.1" 200 12 "-" "-"
+2026-08-22T10:51:26.31229185Z 127.0.0.1 - - [22/Aug/2026:10:51:26 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T10:52:55.158887661Z 127.0.0.1 - - [22/Aug/2026:10:52:55 +0000] "GET / HTTP/1.1" 200 27 "-" "pulsetic.com (+https://pulsetic.com)"
+2026-08-22T10:54:41.063978426Z ==> Detected service running on port 10000
+2026-08-22T10:54:41.165976351Z ==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+2026-08-22T10:54:51.632050002Z Gemini request rejected: 429 {
+2026-08-22T10:54:51.632066523Z   "error": {
+2026-08-22T10:54:51.632070143Z     "code": 429,
+2026-08-22T10:54:51.632073724Z     "message": "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. ",
+2026-08-22T10:54:51.632089125Z     "stat
+2026-08-22T10:54:51.632094675Z 127.0.0.1 - - [22/Aug/2026:10:54:51 +0000] "POST /webhook HTTP/1.1" 200 12 "-" "-"
